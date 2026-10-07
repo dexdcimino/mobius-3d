@@ -127,7 +127,7 @@ try {
   for (const name of FORMATS) {
     await open(name, ...(name === 'triangle.gltf' ? ['triangle.bin'] : []));
     const s = await stats(), c = await card();
-    note(!c && /triangles/.test(s), `${name}: ${c ? `error card "${c.title}"` : `stats "${s}"`}`);
+    note(!c && /\d triangles?\b/.test(s), `${name}: ${c ? `error card "${c.title}"` : `stats "${s}"`}`);
   }
   // Textured OBJ: the MTL and the PNG have to come along.
   await open('textured.obj', 'textured.mtl', 'checker.png');

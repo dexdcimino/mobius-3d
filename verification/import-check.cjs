@@ -13,7 +13,7 @@ const root=path.resolve(__dirname,'..'),dir=path.join(__dirname,'fixtures');
   await page.locator('#files').setInputFiles([path.join(dir,name),...(ext==='gltf'?[path.join(dir,'triangle.bin')]:[])]);
   await page.waitForFunction(()=>!document.querySelector('#open').disabled);
   assert.equal(await page.locator('#filename').textContent(),name,await page.locator('#status').textContent());
-  assert.match(await page.locator('#stats').textContent(),/^1 triangles/);
+  assert.match(await page.locator('#stats').textContent(),/^1 triangle\b/);
   assert.equal(await page.locator('#status').textContent(),'');results.push(ext);
  }
  await page.locator('#grid').uncheck();

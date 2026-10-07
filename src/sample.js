@@ -45,8 +45,10 @@ export function trefoilKnot({ tubular = 2400, radial = 160 } = {}) {
   for (let i = 0; i < position.count; i++) {
     // Height decides the blend, as in the icon: red over the top, orange through
     // the middle, red again underneath.
-    const t = 1 - Math.abs(position.getY(i) / 1.4);
-    c.copy(red).lerp(orange, Math.max(0, Math.min(1, t)));
+    // Squared and capped, so red dominates as it does in the icon and orange
+    // is a band through the middle rather than the whole knot.
+    const t = Math.max(0, Math.min(1, 1 - Math.abs(position.getY(i) / 1.1)));
+    c.copy(red).lerp(orange, t * t * 0.9);
     colors.set([c.r, c.g, c.b], i * 3);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));

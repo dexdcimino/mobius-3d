@@ -37,7 +37,7 @@ try {
   const page = await app.firstWindow();
   await page.waitForFunction(() => window.viewerReady === true);
   await page.waitForFunction(() => document.querySelector('#filename').textContent === 'mesh space ü.glb', null, { timeout: 30000 });
-  note(/^1 triangles/.test(await page.locator('#stats').textContent()), 'the launch model did not open');
+  note(/^1 triangle\b/.test(await page.locator('#stats').textContent()), 'the launch model did not open');
   note(await page.evaluate(() => location.protocol) === 'mobius:', 'the window is not on the mobius: scheme');
   note(await page.evaluate(() => typeof process === 'undefined' && typeof require === 'undefined'), 'the page can reach Node');
   note(await page.evaluate(() => document.querySelector('header h1').textContent) === 'Mobius 3D', 'the window is not branded Mobius 3D');

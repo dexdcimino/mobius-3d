@@ -133,6 +133,8 @@ function clearModel() {
   requestRender();
 }
 
+const plural = (n, one, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
 function setModel(object, name) {
   root = object;
   holder.rotation.set(0,0,0);
@@ -167,10 +169,10 @@ function setModel(object, name) {
   grid.visible = $('grid').checked;
   $('filename').textContent = name;
   $('stats').textContent = [
-    meshes.length && `${Math.round(triangles).toLocaleString()} triangles`,
-    meshes.length && `${vertexCount.toLocaleString()} vertices`,
-    meshes.length && `${meshes.length} meshes`,
-    pointCount && `${pointCount.toLocaleString()} points`,
+    meshes.length && plural(Math.round(triangles), 'triangle'),
+    meshes.length && plural(vertexCount, 'vertex', 'vertices'),
+    meshes.length && plural(meshes.length, 'mesh', 'meshes'),
+    pointCount && plural(pointCount, 'point'),
   ].filter(Boolean).join('  ·  ');
   $('colors').textContent = `${colored} of ${meshes.length} meshes have vertex colors`;
   $('normals').textContent = generatedNormals ? `${generatedNormals} meshes lacked normals; generated for display.` : 'Imported normals preserved — original hard/smooth shading.';
