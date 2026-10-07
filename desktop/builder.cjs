@@ -22,7 +22,9 @@ module.exports = {
   directories: { output: 'release', buildResources: 'build' },
   files: ['dist/**', 'desktop/*.cjs', 'desktop/*.json', 'desktop/icon.png', 'README.md', 'FORMATS.md', 'THIRD-PARTY-LICENSE.txt'],
   asar: true,
-  publish: [{ provider: 'github', owner: 'dexdcimino', repo: 'mobius-3d' }],
+  // releaseType 'release': published as it builds. The default is a DRAFT,
+  // which installed copies cannot see, so they would never update.
+  publish: [{ provider: 'github', owner: 'dexdcimino', repo: 'mobius-3d', releaseType: 'release' }],
 
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],

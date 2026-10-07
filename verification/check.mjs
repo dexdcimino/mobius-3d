@@ -229,7 +229,10 @@ try {
   // ---- 8. Cancel stops a worker parse --------------------------------------
   await frame.setInputFiles('#files', heavyObj);
   await frame.waitForFunction(() => !document.getElementById('loading').hidden && !document.getElementById('loading-cancel').hidden, null, { timeout: 10000 });
-  await frame.click('#loading-cancel');
+  /* Pressed the INSTANT the card shows, from inside the page. A fast machine
+     (GitHub's runners) parses this OBJ before a pointer click finishes waiting
+     for the button to be "stable", and the card is gone by the time it lands. */
+  await frame.evaluate(() => document.getElementById('loading-cancel').click());
   await frame.waitForFunction(() => document.getElementById('loading').hidden, null, { timeout: 5000 });
   const afterCancel = await frame.evaluate(() => ({ empty: !document.getElementById('empty').hidden, stats: document.getElementById('stats').textContent }));
   note(afterCancel.empty && !afterCancel.stats && !(await card()), `after Cancel: ${JSON.stringify(afterCancel)}`);
