@@ -1,0 +1,36 @@
+# A version tag builds the desktop app for all three systems on GitHub's own
+# machines and publishes them to this repo's Releases -- which is also where
+# installed copies look for their updates.
+#
+#   bump "version" in package.json, commit, then:
+#   git tag v0.3.1 && git push origin v0.3.1
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The tag and package.json must agree, or the updater compares the
+      # wrong versions and never offers the update.
+      - name: Tag matches package.json
+        shell: bash
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple Developer ID: build unsigned instead of failing.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'

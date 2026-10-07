@@ -1,0 +1,6 @@
+{
+  "name": "Mobius 3D",
+  "appId": "com.dexcimino.mobius3d",
+  "shellVerb": "Mobius3D.Open",
+  "executable": "Mobius3D"
+}

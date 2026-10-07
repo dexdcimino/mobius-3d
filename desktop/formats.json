@@ -1,0 +1,5 @@
+{
+  "extensions": ["glb", "gltf", "fbx", "obj", "ply", "stl", "dae", "3mf", "3ds", "usdz", "usd", "usda", "usdc"],
+  "description": "3D models",
+  "limits": ["No native Blender, ZBrush, Maya, Max or CAD-solid files: export GLB, FBX or OBJ", "No animation playback", "512 MiB per selected model; 256 MiB total companion assets", "Static previews may differ from authoring-tool shaders"]
+}

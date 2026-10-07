@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.build-cache/
+.npm-cache/
+# what the checks write when they run
+verification/*.png
+verification/*-results.json
+verification/desktop-profile/
