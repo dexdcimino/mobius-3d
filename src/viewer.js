@@ -258,7 +258,8 @@ function setModel(object, name) { imported = makeRecord(object, name); show(impo
    map switchable below. Unlit: no lighting at all -- base colour, its texture
    and vertex colours as they are. Vertex colors: those colours, lit. Grayscale:
    one neutral material, to read the surface. Normals: directions as RGB.
-   Wireframe, flat and two-sided apply to every one of them. */
+   Wireframe and two-sided apply to every one of them. (A Flat shading switch
+   was here; Dex had it taken out: beside Unlit it read as the same thing.) */
 function applyMode() {
   temporary.forEach(m => m.dispose()); temporary = [];
   const mode = $('mode').value;
@@ -285,7 +286,7 @@ function applyMode() {
       else if(mode === 'normal') material = new THREE.MeshNormalMaterial();
       else material = new THREE.MeshStandardMaterial({ color: 0xa7abb3, roughness: .42, metalness: 0 });
       material.wireframe = $('wireframe').checked;
-      material.flatShading = $('flat').checked || (mode === 'material' && !!original.flatShading);
+      material.flatShading = mode === 'material' && !!original.flatShading;
       material.side = $('twosided').checked ? THREE.DoubleSide : original.side;
       material.needsUpdate = true;
       temporary.push(material); return material;
@@ -507,7 +508,7 @@ document.addEventListener('keydown', event => {
 
 $('open').onclick = () => window.mobiusDesktop ? window.mobiusDesktop.open().catch(error => status(error.message, true)) : $('files').click();
 $('files').onchange = e => loadFiles([...e.target.files]);
-for(const id of ['mode','wireframe','flat','twosided']) $(id).onchange = applyMode;
+for(const id of ['mode','wireframe','twosided']) $(id).onchange = applyMode;
 for (const box of document.querySelectorAll('#maps input')) box.onchange = applyMode;
 const dropdowns = [dropdown($('mode')), dropdown($('lighting'))];
 motion = initMotion(requestRender);
@@ -665,7 +666,7 @@ $('reset').onclick = () => {
     el.dispatchEvent(new Event(event, { bubbles: true }));
   };
   set('mode', 'material'); set('lighting', 'studio'); set('rotateLight', 0, 'input'); set('exposure', 1, 'input');
-  for (const id of ['wireframe', 'flat', 'twosided', 'spin']) set(id, false);
+  for (const id of ['wireframe', 'twosided', 'spin']) set(id, false);
   set('grid', true);
   for (const box of document.querySelectorAll('#maps input')) box.checked = true;
   motion.reset();

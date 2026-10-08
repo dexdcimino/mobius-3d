@@ -283,15 +283,16 @@ try {
   console.log(`screenshot: ${Math.round(pngBytes / 1024)} KB`);
 
   // ---- 10b. the controls (Dex, 2026-10-08) ---------------------------------
-  // Wireframe and flat shading must change what is DRAWN, which is why the
-  // knot came down from 768,000 triangles: at that density both looked like
+  // Wireframe must change what is DRAWN, which is why the
+  // knot came down from 768,000 triangles: at that density it looked like
   // nothing happened. Asserted on the materials actually on the mesh.
   {
     const materials = () => frame.evaluate(() => window.mobiusDebug.materials());
     await frame.click('label:has(#wireframe)');
-    await frame.click('label:has(#flat)');
     const m1 = await materials();
-    note(m1.length === 1 && m1[0].wireframe && m1[0].flatShading, `wireframe + flat on the knot: ${JSON.stringify(m1)}`);
+    note(m1.length === 1 && m1[0].wireframe, `wireframe on the knot: ${JSON.stringify(m1)}`);
+    // Flat shading was removed (Dex, 2026-10-08): no switch left behind.
+    note(!(await frame.$('#flat')), 'the Flat shading switch is still on the page');
     // The drawn dropdown: same width as its button, five one-or-two word modes.
     await frame.click('#mode-button');
     const dd = await frame.evaluate(() => {
@@ -332,8 +333,8 @@ try {
     const asked = await frame.textContent('#reset');
     await frame.click('#reset');
     const reset = await frame.evaluate(() => ({ mode: document.getElementById('mode').value, label: document.getElementById('mode-button').textContent,
-      wire: document.getElementById('wireframe').checked, flat: document.getElementById('flat').checked, accent: document.getElementById('accent-name').textContent }));
-    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && !reset.flat && reset.accent === 'Orange',
+      wire: document.getElementById('wireframe').checked, accent: document.getElementById('accent-name').textContent }));
+    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && reset.accent === 'Orange',
          `Reset: asked "${asked}", then ${JSON.stringify(reset)}`);
     console.log(`controls: ${shapes.map(s => s[0]).join(' / ')}; reset asked "${asked}"`);
   }
