@@ -90,7 +90,7 @@ try {
   await page.evaluate(() => window.openViewer('&sample=knot'));
   const frame = await (await page.waitForSelector('#f')).contentFrame();
   await frame.waitForFunction(() => window.viewerReady === true, null, { timeout: 30000 });
-  const stats = () => frame.evaluate(() => document.getElementById('stats').textContent);
+  const stats = () => frame.evaluate(() => (window.mobiusDebug?.statsText || ''));
   const card = () => frame.evaluate(() => {
     const c = document.getElementById('error-card');
     return c.hidden ? null : { title: document.getElementById('error-title').textContent, body: document.getElementById('error-body').textContent };
@@ -99,8 +99,8 @@ try {
   // ---- 1. it starts, it is Mobius, and the sample is the knot -------------
   const head = await frame.evaluate(() => ({ h1: document.querySelector('header h1').textContent, title: document.title }));
   note(head.h1 === 'Mobius 3D' && /Mobius 3D/.test(head.title), `the header reads "${head.h1}" / "${head.title}"`);
-  await frame.waitForFunction(() => /triangles/.test(document.getElementById('stats').textContent), null, { timeout: 30000 });
-  note(/768,000 triangles/.test(await stats()), `the sample knot reports "${await stats()}"`);
+  await frame.waitForFunction(() => /triangles/.test((window.mobiusDebug?.statsText || '')), null, { timeout: 30000 });
+  note(/28,800 triangles/.test(await stats()), `the sample knot reports "${await stats()}"`);
 
   // ---- 2. render on demand: an idle viewer draws NOTHING ------------------
   await page.waitForTimeout(1500);   // let the damping settle
@@ -234,7 +234,7 @@ try {
      for the button to be "stable", and the card is gone by the time it lands. */
   await frame.evaluate(() => document.getElementById('loading-cancel').click());
   await frame.waitForFunction(() => document.getElementById('loading').hidden, null, { timeout: 5000 });
-  const afterCancel = await frame.evaluate(() => ({ empty: !document.getElementById('empty').hidden, stats: document.getElementById('stats').textContent }));
+  const afterCancel = await frame.evaluate(() => ({ empty: !document.getElementById('empty').hidden, stats: (window.mobiusDebug?.statsText || '') }));
   note(afterCancel.empty && !afterCancel.stats && !(await card()), `after Cancel: ${JSON.stringify(afterCancel)}`);
 
   // ---- 9. Escape is claimed by what it closes, inside the overlay ----------
@@ -252,7 +252,7 @@ try {
   await page.waitForTimeout(200);
   note(!(await page.evaluate(() => document.getElementById('d').open)), 'a second Escape did not close the overlay');
   await page.evaluate(() => window.openViewer('&sample=knot'));
-  await frame.waitForFunction(() => window.viewerReady === true && /triangles/.test(document.getElementById('stats').textContent));
+  await frame.waitForFunction(() => window.viewerReady === true && /triangles/.test((window.mobiusDebug?.statsText || '')));
 
   // ---- 10. the screenshot, without preserveDrawingBuffer, from the sandbox -
   const [download] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), frame.click('#capture')]);
@@ -261,6 +261,62 @@ try {
   const pngBytes = (await stat(png)).size;
   note(pngBytes > 20000, `the screenshot is ${pngBytes} bytes — a blank frame compresses to a few KB`);
   console.log(`screenshot: ${Math.round(pngBytes / 1024)} KB`);
+
+  // ---- 10b. the controls (Dex, 2026-10-08) ---------------------------------
+  // Wireframe and flat shading must change what is DRAWN, which is why the
+  // knot came down from 768,000 triangles: at that density both looked like
+  // nothing happened. Asserted on the materials actually on the mesh.
+  {
+    const materials = () => frame.evaluate(() => window.mobiusDebug.materials());
+    await frame.click('label:has(#wireframe)');
+    await frame.click('label:has(#flat)');
+    const m1 = await materials();
+    note(m1.length === 1 && m1[0].wireframe && m1[0].flatShading, `wireframe + flat on the knot: ${JSON.stringify(m1)}`);
+    // The drawn dropdown: same width as its button, five one-or-two word modes.
+    await frame.click('#mode-button');
+    const dd = await frame.evaluate(() => {
+      const b = document.getElementById('mode-button').getBoundingClientRect(), l = document.getElementById('mode-list').getBoundingClientRect();
+      return { shown: !document.getElementById('mode-list').hidden, same: Math.abs(b.width - l.width) < 1, items: [...document.querySelectorAll('#mode-list li')].map(li => li.textContent) };
+    });
+    note(dd.shown && dd.same && dd.items.join() === 'Normals,Grayscale,Vertex colors,Unlit,Material', `the shading list: ${JSON.stringify(dd)}`);
+    await frame.click('#mode-list li:text-is("Grayscale")');
+    const m2 = await materials();
+    note(m2[0]?.type === 'MeshStandardMaterial' && m2[0].wireframe && (await frame.evaluate(() => document.getElementById('mode').value)) === 'clay',
+         `Grayscale from the list: ${JSON.stringify(m2)}`);
+    // Shift-click: a closed section opens all, an open one closes all.
+    await frame.click('details:has(> summary:text-is("Lighting")) > summary', { modifiers: ['Shift'] });
+    const allOpen = await frame.evaluate(() => [...document.querySelectorAll('.panel-controls details')].every(d => d.open));
+    await frame.click('details:has(> summary:text-is("Lighting")) > summary', { modifiers: ['Shift'] });
+    const allShut = await frame.evaluate(() => [...document.querySelectorAll('.panel-controls details')].every(d => !d.open));
+    note(allOpen && allShut, `shift-click: all open ${allOpen}, all shut ${allShut}`);
+    await frame.click('details:has(> summary:text-is("Surface")) > summary');
+    // The Sample toggle and the four shapes, each repainting from the accent.
+    await frame.click('details:has(> summary:text-is("Sample")) > summary');
+    const shapes = [];
+    for (const k of ['mobius', 'shell', 'klein', 'knot']) {
+      await frame.click(`[data-sample="${k}"]`);
+      shapes.push(await frame.evaluate(() => [document.getElementById('filename').textContent, window.mobiusDebug.statsText]));
+    }
+    note(new Set(shapes.map(s => s[0])).size === 4 && shapes.every(s => /triangles/.test(s[1])), `the four samples: ${JSON.stringify(shapes)}`);
+    const tint = () => frame.evaluate(() => window.mobiusDebug.sampleTop());
+    const before = await tint();
+    await frame.click('[data-accent="Blue"]');
+    const after = await tint();
+    note(before && after && before !== after && after.b > after.r, `the sample did not follow the accent: ${JSON.stringify([before, after])}`);
+    await frame.click('#sample-toggle');
+    const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed') }));
+    note(off.shown === null && off.empty && off.pressed === 'false', `Sample off with nothing imported: ${JSON.stringify(off)}`);
+    await frame.click('#sample-toggle');
+    // Reset asks first, then puts every option back.
+    await frame.click('#reset');
+    const asked = await frame.textContent('#reset');
+    await frame.click('#reset');
+    const reset = await frame.evaluate(() => ({ mode: document.getElementById('mode').value, label: document.getElementById('mode-button').textContent,
+      wire: document.getElementById('wireframe').checked, flat: document.getElementById('flat').checked, accent: document.getElementById('accent-name').textContent }));
+    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && !reset.flat && reset.accent === 'Orange',
+         `Reset: asked "${asked}", then ${JSON.stringify(reset)}`);
+    console.log(`controls: ${shapes.map(s => s[0]).join(' / ')}; reset asked "${asked}"`);
+  }
 
   // ---- 11. the GPU dropping the context says so ----------------------------
   await frame.evaluate(() => window.mobiusDebug.loseContext());
@@ -279,8 +335,8 @@ try {
       Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('denied', 'SecurityError'); } });
     });
     await blocked.goto(`${ORIGIN}/mobius/?sample=knot`);
-    await blocked.waitForFunction(() => window.viewerReady === true && /triangles/.test(document.getElementById('stats').textContent), null, { timeout: 30000 }).catch(() => {});
-    note(/768,000 triangles/.test(await blocked.evaluate(() => document.getElementById('stats').textContent)) && !blockedErrors.length,
+    await blocked.waitForFunction(() => window.viewerReady === true && /triangles/.test((window.mobiusDebug?.statsText || '')), null, { timeout: 30000 }).catch(() => {});
+    note(/28,800 triangles/.test(await blocked.evaluate(() => (window.mobiusDebug?.statsText || ''))) && !blockedErrors.length,
          `with storage refused: ${blockedErrors.join(' | ') || 'the sample never loaded'}`);
     await blocked.setViewportSize({ width: 600, height: 820 });
     // Waited for, as the original did: the media-query listener runs when the
