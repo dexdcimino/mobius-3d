@@ -338,6 +338,19 @@ try {
     const mk2 = await frame.evaluate(() => window.mobiusDebug.swatchMark);
     note(mk1.on === 'Blue' && mk2.on === 'Blue' && /^M[\d.]+ [\d.]+(L[\d.]+ [\d.]+){71}Z$/.test(mk2.path) && mk1.path !== mk2.path,
          `the swatch mark: ${JSON.stringify([mk1.on, mk2.on, mk1.path?.slice(0, 30), mk2.path?.slice(0, 30)])}`);
+    // It IS the swatch, not a shape inside one: the button's own circle is
+    // gone, the mark covers its whole outline, and it is drawn in Blue.
+    const whole = await frame.evaluate(() => {
+      const b = document.querySelector('.accent-swatch[data-accent="Blue"]'), m = b.querySelector('.accent-mark');
+      const br = b.getBoundingClientRect(), mr = m.getBoundingClientRect();
+      // The swatch colour as this browser writes it, to compare like with like.
+      const probe = document.createElement('i'); probe.style.color = b.style.getPropertyValue('--swatch'); document.body.appendChild(probe);
+      const swatch = getComputedStyle(probe).color; probe.remove();
+      return { bg: getComputedStyle(b).backgroundColor, fill: getComputedStyle(m.querySelector('path')).fill, swatch,
+        fit: [mr.left - br.left, mr.top - br.top, mr.width - br.width, mr.height - br.height].map(n => +n.toFixed(2)) };
+    });
+    note(/^(transparent|rgba\(0, 0, 0, 0\))$/.test(whole.bg) && whole.fit.every(n => Math.abs(n) <= 1) && whole.fill === whole.swatch,
+         `the pressed swatch is not the mark itself: ${JSON.stringify(whole)}`);
     await frame.click('#sample-toggle');
     const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed'), shadow: window.mobiusDebug.lighting().shadow }));
     note(off.shown === null && off.empty && off.pressed === 'false' && !off.shadow, `Sample off with nothing imported: ${JSON.stringify(off)}`);
@@ -478,5 +491,6 @@ try {
 }
 
 console.log(`\nmobius check: ${pass} passed${fail.length ? `, ${fail.length} FAILED` : ''}`);
-for (const f of fail) console.log(`  - ${f}`);
+// On GitHub the failures are annotations too, readable without the log.
+for (const f of fail) console.log(process.env.GITHUB_ACTIONS ? `::error::${f.replace(/\n/g, ' ')}` : `  - ${f}`);
 process.exit(fail.length ? 1 : 0);
