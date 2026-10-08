@@ -1,6 +1,8 @@
-# Composites a matted knot onto the app-icon tile: a dark rounded square like the old icon's.
-import sys
+# Composites a matted knot onto the app-icon tile: a rounded square in the viewer's background colour.
+import sys, colorsys
 from PIL import Image, ImageDraw, ImageFilter, ImageChops
+BACKGROUND_H, BACKGROUND_S, BACKGROUND_V = colorsys.rgb_to_hsv(0x0a / 255, 0x18 / 255, 0x21 / 255)
+SPREAD = .065
 def tile(src, size=1024, fill=.64, shadow=True):
     k = Image.open(src).convert('RGBA')
     # The app's floor shadow, seen from above, rings the knot in near-opaque black; keep only the knot
@@ -17,11 +19,13 @@ def tile(src, size=1024, fill=.64, shadow=True):
     k = k.resize((round(k.width * scale), round(k.height * scale)), Image.LANCZOS)
     m = round(size * .055); r = round(size * .2)
     out = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    # tile: a soft top-to-bottom gradient in the old icon's charcoal
+    # tile: the viewer's own background (DEFAULT_BACKGROUND, #0a1821) as the
+    # midtone of a top-to-bottom gradient -- the same hue and saturation all
+    # the way, brightness from BACKGROUND_V + SPREAD at the top to - at the foot.
     grad = Image.new('RGBA', (size, size))
-    top, bot = (34, 37, 46), (12, 13, 18)
     for y in range(size):
-        t = y / size; grad.paste(tuple(round(top[i] + (bot[i] - top[i]) * t) for i in range(3)) + (255,), (0, y, size, y + 1))
+        v = BACKGROUND_V + SPREAD * (1 - 2 * (y + .5) / size)
+        grad.paste(tuple(round(c * 255) for c in colorsys.hsv_to_rgb(BACKGROUND_H, BACKGROUND_S, v)) + (255,), (0, y, size, y + 1))
     mask = Image.new('L', (size, size), 0); ImageDraw.Draw(mask).rounded_rectangle((m, m, size - m, size - m), r, fill=255)
     out.paste(grad, (0, 0), mask)
     layer = Image.new('RGBA', (size, size), (0, 0, 0, 0))
