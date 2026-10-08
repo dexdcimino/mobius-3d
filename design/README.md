@@ -2,7 +2,7 @@
 
 The project was called Clayweld while these were made; the names below are from then.
 
-`10-warm-gradient.png` is the current app icon. `build/icon.png`, `build/icon.ico` and `desktop/icon.png` are cut from it with the black surround made transparent.
+`10-warm-gradient.png` was the app icon until 0.5.3. The icon is now a render of the viewer's own sample knot; `tools/icon/README.md` says how it is made.
 
 Source: `../logo-reference.png`. These are visual concepts for review, not final app assets. The monochrome images are raster previews in a vector-like style; a selected mark can be redrawn as SVG for production.
 
