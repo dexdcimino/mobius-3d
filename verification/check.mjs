@@ -324,9 +324,14 @@ try {
     await frame.click('[data-accent="Blue"]');
     const after = await tint();
     note(before && after && before !== after && after.b > after.r, `the sample did not follow the accent: ${JSON.stringify([before, after])}`);
+    // The rim and the underlight are the accent, SATURATED -- not white with a
+    // tint, which is what Dex asked to be rid of -- and the room follows it.
+    const lit = await frame.evaluate(() => window.mobiusDebug.lighting());
+    const vivid = c => c[2] > c[0] && Math.max(...c) - Math.min(...c) > .3 * Math.max(...c);
+    note(vivid(lit.rim) && vivid(lit.under) && lit.shadow && lit.studio, `the lighting did not take the Blue accent: ${JSON.stringify(lit)}`);
     await frame.click('#sample-toggle');
-    const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed') }));
-    note(off.shown === null && off.empty && off.pressed === 'false', `Sample off with nothing imported: ${JSON.stringify(off)}`);
+    const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed'), shadow: window.mobiusDebug.lighting().shadow }));
+    note(off.shown === null && off.empty && off.pressed === 'false' && !off.shadow, `Sample off with nothing imported: ${JSON.stringify(off)}`);
     await frame.click('#sample-toggle');
     // Reset asks first, then puts every option back.
     await frame.click('#reset');

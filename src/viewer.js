@@ -16,13 +16,13 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import brand from '../desktop/brand.json';
 import { supported, extensionOf, nativeAdvice, sniffMismatch, fbxVersion } from './formats.js';
 import { showError, hideError, describeFailure } from './errors.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { DEFAULT_BACKGROUND, initBackground } from './background.js';
-import { ACCENTS, underlight, rimlight } from './accent.js';
+import { ACCENTS, underlight, rimlight, underglow } from './accent.js';
 import { captureCamera } from './capture.js';
 import { SAMPLES, makeSample, paintSample } from './sample.js';
 import { dropdown } from './dropdown.js';
 import { initMotion, clipsOf, shapesOf } from './motion.js';
+import { initStudio, initContactShadow } from './studio.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -46,25 +46,30 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-const pmrem = new THREE.PMREMGenerator(renderer);
-const room = new RoomEnvironment();
-const studio = pmrem.fromScene(room, 0.04);
-room.dispose(); pmrem.dispose();
-scene.environment = studio.texture;
-/* The levels are for Neutral tone mapping, which does not squash highlights
-   the way ACES did: at the old levels everything lit came out one flat,
-   clipped colour with no shading left in it. */
-scene.environmentIntensity = 0.45;
-const hemi = new THREE.HemisphereLight(0xffffff, 0x53596b, .6);
+const studio = initStudio(renderer);
+scene.environmentIntensity = 1.1;
+const hemi = new THREE.HemisphereLight(0xffffff, 0x53596b, .3);
 scene.add(hemi);
 const lights = new THREE.Group();
-// Key, fill, and a rim from behind -- the rim and the hemisphere's ground
-// colour (the light from below) are tinted from the accent in selectAccent().
-for (const [color, intensity, position] of [[0xffffff, 1.8, [4, 6, 5]], [0xb4ceff, .5, [-4, 2, 1]], [0xffffff, 1.2, [1, 4, -5]]]) {
-  const light = new THREE.DirectionalLight(color, intensity);
+/* Key (warm), fill (cool), a rim from behind and a light from BELOW. The rim
+   and the underlight are the accent, saturated, so an edge and an underside
+   glow in the accent colour instead of going white or grey; selectAccent()
+   tints them, and the hemisphere's ground colour with them. */
+const RIG = { studio: [[1.7, .3, 2.4, .6], .3], soft: [[.7, .25, 1, .4], .9], raking: [[3, 0, 1.4, 0], .05] };
+for (const [color, position] of [[0xfff1e0, [4, 6, 5]], [0xb4ceff, [-5, 2, 2]], [0xffffff, [-1.5, 3.5, -6]], [0xffffff, [1, -6, 2.5]]]) {
+  const light = new THREE.DirectionalLight(color, 0);
   light.position.set(...position); lights.add(light);
 }
 scene.add(lights);
+const [, , rimLight, underLight] = lights.children;
+function useRig(preset) {
+  const [intensities, sky] = RIG[preset] || RIG.studio;
+  lights.children.forEach((light, i) => light.intensity = intensities[i]);
+  hemi.intensity = sky;
+}
+useRig('studio');
+const contact = initContactShadow(renderer, scene);
+const floor = contact.floor;
 const grid = new THREE.GridHelper(12, 24, 0x626eaa, 0x30395f);
 scene.add(grid);
 const background = initBackground(scene, grid);
@@ -95,6 +100,7 @@ function requestRender() {
     const seconds = lastFrame ? Math.min((now - lastFrame) / 1000, .1) : 0;
     const animating = !!motion?.tick(seconds);
     const moving = controls.update();
+    contact.update(holder, animating);
     renderer.render(scene, camera);
     framesDrawn++;
     if (moving || controls.autoRotate || animating) { lastFrame = now; requestRender(); } else lastFrame = 0;
@@ -150,6 +156,7 @@ function disposeRecord(record) {
 function showNothing() {
   temporary.forEach(m => m.dispose()); temporary = [];
   holder.clear(); root = null; meshes = []; shown = null;
+  floor.visible = false;
   $('empty').hidden = false;
   $('filename').textContent = $('stats').textContent = $('info').textContent = $('maps-note').textContent = '';
   $('capture').disabled = true;
@@ -249,6 +256,7 @@ function show(record, view = 'iso') {
   }));
   syncSampleUI();
   motion.attach(record);
+  floor.visible = true; contact.invalidate();
   applyMode(); fit(view); requestRender();
 }
 
@@ -511,7 +519,7 @@ $('files').onchange = e => loadFiles([...e.target.files]);
 for(const id of ['mode','wireframe','twosided']) $(id).onchange = applyMode;
 for (const box of document.querySelectorAll('#maps input')) box.onchange = applyMode;
 const dropdowns = [dropdown($('mode')), dropdown($('lighting'))];
-motion = initMotion(requestRender);
+motion = initMotion(() => { contact.invalidate(); requestRender(); });
 $('grid').onchange = () => grid.visible = $('grid').checked;
 $('spin').onchange = () => controls.autoRotate = $('spin').checked;
 $('fit').onclick = () => fit();
@@ -520,12 +528,11 @@ document.querySelectorAll('[data-view]').forEach(button => button.onclick = () =
 $('exposure').oninput = () => renderer.toneMappingExposure = Number($('exposure').value);
 $('lighting').onchange = () => {
   const preset = $('lighting').value;
-  scene.environment = preset === 'studio' ? studio.texture : null;
-  hemi.intensity = preset === 'raking' ? .1 : preset === 'soft' ? 1.3 : .6;
-  lights.children.forEach((l,i) => l.intensity = preset === 'raking' ? [3,0,0][i] : preset === 'soft' ? [.5,.2,.3][i] : [1.8,.5,1.2][i]);
+  scene.environment = preset === 'studio' ? studio.texture : null; requestRender();
+  useRig(preset);
 };
 $('rotateLight').oninput = () => { lights.rotation.y = Number($('rotateLight').value); scene.environmentRotation.y = lights.rotation.y; };
-$('up').onclick = () => { holder.rotation.x -= Math.PI/2; fit('iso'); };
+$('up').onclick = () => { holder.rotation.x -= Math.PI/2; contact.invalidate(); fit('iso'); };
 $('capture').onclick = () => {
   const exportCamera = captureCamera(camera, holder, renderer.domElement.width/renderer.domElement.height);
   const gridWasVisible = grid.visible;
@@ -592,7 +599,9 @@ function selectAccent(name) {
   }
   background.setAccent(color);
   accentHex = color;
-  hemi.groundColor.copy(underlight(color)); lights.children[2].color.copy(rimlight(color));
+  const room = studio.setAccent(color);
+  if ($('lighting').value === 'studio') scene.environment = room;
+  hemi.groundColor.copy(underlight(color)); rimLight.color.copy(rimlight(color)); underLight.color.copy(underglow(color));
   if (sample) { paintSample(sample.root, color); requestRender(); }
   try { localStorage.setItem('mobius-accent', label); } catch { /* Storage may be unavailable for local files. */ }
 }
@@ -706,6 +715,7 @@ window.mobiusDebug = {
   // back: with render-on-demand and no preserveDrawingBuffer the buffer is
   // only readable in the same task that drew it.
   render: () => renderer.render(scene, camera),
+  lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture }),
 };
 if (window.mobiusDesktop) {
   let incoming = Promise.resolve();

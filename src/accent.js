@@ -83,8 +83,10 @@ const towardHue = (h, target, max) => {
 const DEG = Math.PI / 180;
 export function sampleGradient(accentHex = ACCENTS[1][1]) {
   const source = toOklch(new THREE.Color(accentHex));
-  const top = { L: Math.min(.7, source.L + .02), C: source.C * 1.05, h: towardHue(source.h, 100 * DEG, 10 * DEG) };
-  const bottom = { L: .34, C: source.C * .95, h: towardHue(source.h, 285 * DEG, 20 * DEG) };
+  // Yellow only stays yellow light: held at L .7 like the rest, gold went olive.
+  const yellow = Math.max(0, Math.cos(source.h - 95 * DEG)) ** 4;
+  const top = { L: Math.min(.7 + .1 * yellow, source.L + .02), C: source.C * 1.2, h: towardHue(source.h, 100 * DEG, 10 * DEG) };
+  const bottom = { L: .34, C: source.C * 1.1, h: towardHue(source.h, 285 * DEG, 20 * DEG) };
   return { top: atLightness(top.L, top), bottom: atLightness(bottom.L, bottom) };
 }
 
@@ -92,10 +94,17 @@ export function sampleGradient(accentHex = ACCENTS[1][1]) {
 // accent instead of the grey-white that lit every underside the same.
 export function underlight(accentHex = ACCENTS[1][1]) {
   const source = toOklch(new THREE.Color(accentHex));
-  return atLightness(.38, { L: .38, C: source.C * .55, h: source.h });
+  return atLightness(.36, { L: .36, C: source.C * .8, h: source.h });
 }
-// The rim light behind the model, the accent at its lightest.
+// The rim light behind the model: the accent, light but still saturated, so an
+// edge glows in the accent's colour. At C x .35 it read as white with a tint.
 export function rimlight(accentHex = ACCENTS[1][1]) {
   const source = toOklch(new THREE.Color(accentHex));
-  return atLightness(.9, { L: .9, C: source.C * .35, h: source.h });
+  return atLightness(.8, { L: .8, C: source.C * .9, h: source.h });
+}
+// The direct light from underneath: the accent at full colour, a bounce off
+// a coloured floor.
+export function underglow(accentHex = ACCENTS[1][1]) {
+  const source = toOklch(new THREE.Color(accentHex));
+  return atLightness(.62, { L: .62, C: source.C * 1.1, h: source.h });
 }
