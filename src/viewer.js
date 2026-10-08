@@ -250,14 +250,22 @@ function show(record, view = 'iso') {
     meshes.length && plural(meshes.length, 'mesh', 'meshes'),
     record.points && `${short(record.points)} points`,
   ].filter(Boolean).join('  ·  ');
-  const rows = [['Objects', record.objects], ['Meshes', meshes.length], ['Materials', record.materials], ['Textures', record.textures],
-    ['Vertices', record.vertices], ['Triangles', record.triangles], record.points && ['Points', record.points],
-    record.clips.length && ['Animations', record.clips.length], record.shapes.size && ['Blend shapes', record.shapes.size], ['Size', dims(record.size)]];
-  $('info').replaceChildren(...rows.filter(Boolean).flatMap(([k, v]) => {
-    const dt = document.createElement('dt'), dd = document.createElement('dd');
+  // Triangles, vertices and size across the top; then the six counts, read
+  // down the left (objects, meshes, materials) and down the right (textures,
+  // animations, blend shapes). glTF is in metres by its spec, so its size says
+  // so; other formats carry no unit anyone can trust.
+  const metres = /\.(glb|gltf)$/i.test(record.name);
+  const wide = [['Triangles', record.triangles], ['Vertices', record.vertices], record.points && ['Points', record.points],
+    ['Size', dims(record.size) + (metres ? ' m' : '')]];
+  const left = [['Objects', record.objects], ['Meshes', meshes.length], ['Materials', record.materials]];
+  const right = [['Textures', record.textures], ['Animations', record.clips.length], ['Blend shapes', record.shapes.size]];
+  const cell = ([k, v], wide) => {
+    const div = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
+    if (wide) div.className = 'wide';
     dt.textContent = k; dd.textContent = typeof v === 'number' ? v.toLocaleString() : v; dd.dataset.info = k.toLowerCase();
-    return [dt, dd];
-  }));
+    div.append(dt, dd); return div;
+  };
+  $('info').replaceChildren(...wide.filter(Boolean).map(row => cell(row, true)), ...left.flatMap((row, i) => [cell(row), cell(right[i])]));
   syncSampleUI();
   motion.attach(record);
   floor.visible = true; contact.invalidate();
@@ -305,6 +313,8 @@ function applyMode() {
     });
     mesh.material = Array.isArray(originals) ? converted : converted[0];
   }
+  const usable = [...document.querySelectorAll('#maps input')].filter(box => !box.disabled);
+  $('maps-section').firstElementChild.dataset.count = !shown || !shown.maps.size ? 'None' : usable.length ? `${usable.filter(box => box.checked).length} of ${usable.length}` : 'Off';
   if (shown) {
     const found = [...shown.maps];
     $('maps-note').textContent = !found.length ? 'This model has no texture maps.'
@@ -655,11 +665,11 @@ $('load-sample').onclick = () => showSample();
 
 /* SHIFT-CLICK A SECTION to open or close all of them: a closed one opens
    every section, an open one closes every section. */
-for (const summary of document.querySelectorAll('.panel-controls summary')) summary.addEventListener('click', event => {
+for (const summary of document.querySelectorAll('.panel-controls > details > summary')) summary.addEventListener('click', event => {
   if (!event.shiftKey) return;
   event.preventDefault();
   const open = !summary.parentElement.open;
-  for (const d of document.querySelectorAll('.panel-controls details')) d.open = open;
+  for (const d of document.querySelectorAll('.panel-controls > details')) d.open = open;
   requestRender();
 });
 
