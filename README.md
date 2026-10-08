@@ -27,6 +27,9 @@ src/            the viewer -- three.js, one page
 build.mjs       src/ -> dist/  (index.html, scripts, WebAssembly decoders)
 desktop/        the Electron shell that serves dist/ in its own window
 tools/site.mjs  copies dist/ into the portfolio site's /mobius/ folder
+tools/screenshots.mjs, video.mjs, icon/
+                the portfolio's gallery shots, featured video and app icon,
+                all taken from the real build
 verification/   the checks, and the fixtures they open
 ```
 
