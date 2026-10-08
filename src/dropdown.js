@@ -20,15 +20,20 @@ export function dropdown(select) {
   button.setAttribute('aria-controls', list.id);
   wrap.append(button);
   document.body.appendChild(list);   // fixed, so the panel's scroll box cannot clip it
-  let active = -1;
-  const items = [...select.options].map((option, i) => {
-    const li = document.createElement('li');
-    li.setAttribute('role', 'option'); li.dataset.value = option.value; li.textContent = option.textContent;
-    li.onpointermove = () => highlight(i);
-    li.onclick = () => choose(i);
-    list.appendChild(li);
-    return li;
-  });
+  let active = -1, items = [];
+  // Again whenever the options change -- the animation and blend shape lists
+  // are a different set for every model.
+  function rebuild() {
+    items = [...select.options].map((option, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option'); li.dataset.value = option.value; li.textContent = option.textContent;
+      li.onpointermove = () => highlight(i);
+      li.onclick = () => choose(i);
+      return li;
+    });
+    list.replaceChildren(...items);
+    sync();
+  }
   function highlight(i) { active = i; items.forEach((li, j) => li.classList.toggle('active', j === i)); items[i]?.scrollIntoView({ block: 'nearest' }); }
   function sync() {
     label.textContent = select.selectedOptions[0]?.textContent || '';
@@ -74,6 +79,6 @@ export function dropdown(select) {
   addEventListener('resize', () => close());
   document.addEventListener('scroll', e => { if (e.target !== list) close(); }, true);
   select.addEventListener('change', sync);
-  sync();
-  return { sync, close, button, list };
+  rebuild();
+  return { sync, rebuild, close, button, list };
 }

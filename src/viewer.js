@@ -18,10 +18,11 @@ import { supported, extensionOf, nativeAdvice, sniffMismatch, fbxVersion } from 
 import { showError, hideError, describeFailure } from './errors.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { DEFAULT_BACKGROUND, initBackground } from './background.js';
-import { ACCENTS } from './accent.js';
+import { ACCENTS, underlight, rimlight } from './accent.js';
 import { captureCamera } from './capture.js';
 import { SAMPLES, makeSample, paintSample } from './sample.js';
 import { dropdown } from './dropdown.js';
+import { initMotion, clipsOf, shapesOf } from './motion.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -35,7 +36,11 @@ scene.background = new THREE.Color(DEFAULT_BACKGROUND);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+/* Khronos PBR Neutral: made for product viewers. ACES shifted every saturated
+   colour toward its own idea of film -- the accent orange came out a washed
+   salmon -- where Neutral keeps base colours what the file says they are and
+   only rolls off the highlights. */
+renderer.toneMapping = THREE.NeutralToneMapping;
 $('viewport').appendChild(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
@@ -46,11 +51,16 @@ const room = new RoomEnvironment();
 const studio = pmrem.fromScene(room, 0.04);
 room.dispose(); pmrem.dispose();
 scene.environment = studio.texture;
-scene.environmentIntensity = 0.65;
-const hemi = new THREE.HemisphereLight(0xffffff, 0x53596b, 1.3);
+/* The levels are for Neutral tone mapping, which does not squash highlights
+   the way ACES did: at the old levels everything lit came out one flat,
+   clipped colour with no shading left in it. */
+scene.environmentIntensity = 0.45;
+const hemi = new THREE.HemisphereLight(0xffffff, 0x53596b, .6);
 scene.add(hemi);
 const lights = new THREE.Group();
-for (const [color, intensity, position] of [[0xffffff, 2.5, [4, 6, 5]], [0xb4ceff, 1.0, [-4, 2, 1]], [0xffffff, 2.0, [1, 4, -5]]]) {
+// Key, fill, and a rim from behind -- the rim and the hemisphere's ground
+// colour (the light from below) are tinted from the accent in selectAccent().
+for (const [color, intensity, position] of [[0xffffff, 1.8, [4, 6, 5]], [0xb4ceff, .5, [-4, 2, 1]], [0xffffff, 1.2, [1, 4, -5]]]) {
   const light = new THREE.DirectionalLight(color, intensity);
   light.position.set(...position); lights.add(light);
 }
@@ -73,16 +83,21 @@ let contextLost = false;
    touching. Now a frame is drawn when something asks for one: the camera
    moving (OrbitControls fires 'change', and keeps returning true from update()
    while damping settles), any control on the page, a resize, a new model. */
-let frameQueued = false, framesDrawn = 0;
+/* A playing animation is "something moving" too: it keeps the frames coming
+   until it is paused, and the clock restarts when the frames stop so a resume
+   does not jump by however long it sat still. */
+let frameQueued = false, framesDrawn = 0, lastFrame = 0, motion = null;
 function requestRender() {
   if (frameQueued || contextLost) return;
   frameQueued = true;
-  requestAnimationFrame(() => {
+  requestAnimationFrame(now => {
     frameQueued = false;
+    const seconds = lastFrame ? Math.min((now - lastFrame) / 1000, .1) : 0;
+    const animating = !!motion?.tick(seconds);
     const moving = controls.update();
     renderer.render(scene, camera);
     framesDrawn++;
-    if (moving || controls.autoRotate) requestRender();
+    if (moving || controls.autoRotate || animating) { lastFrame = now; requestRender(); } else lastFrame = 0;
   });
 }
 controls.addEventListener('change', requestRender);
@@ -140,6 +155,7 @@ function showNothing() {
   $('capture').disabled = true;
   $('model-info').hidden = true;
   grid.visible = $('grid').checked;
+  motion.attach(null);
   syncSampleUI();
   requestRender();
 }
@@ -155,7 +171,9 @@ const plural = (n, one, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? 
 // 768000 -> 768K, 1234567 -> 1.23M: the header line is a glance, the panel has the exact number.
 const short = n => n < 1e3 ? String(n) : n < 1e6 ? `${+(n / 1e3).toFixed(n < 1e4 ? 1 : 0)}K` : `${+(n / 1e6).toFixed(n < 1e7 ? 2 : 1)}M`;
 const MAP_KEYS = { base: ['map'], normal: ['normalMap', 'bumpMap'], roughness: ['roughnessMap'], metalness: ['metalnessMap'],
-                   specular: ['specularMap', 'specularIntensityMap', 'specularColorMap'] };
+                   specular: ['specularMap', 'specularIntensityMap', 'specularColorMap'], emissive: ['emissiveMap'] };
+// A glow with no map is still emission the Emissive switch should be able to turn off.
+const glows = m => !!m.emissive && m.emissive.getHex() !== 0 && (m.emissiveIntensity ?? 1) > 0;
 
 function makeRecord(object, name) {
   const record = { root: object, name, meshes: [], triangles: 0, vertices: 0, points: 0, objects: 0, maps: new Set() };
@@ -167,11 +185,15 @@ function makeRecord(object, name) {
     if (o.isPoints) { record.points += o.geometry.attributes.position?.count || 0; return; }
     if (!o.isMesh) return;
     if(!o.userData.generatedNormals && !o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+    // A skinned or morphing mesh moves outside the bounds it was loaded with,
+    // and culling against those would blink it out mid-animation.
+    if (o.isSkinnedMesh || o.morphTargetInfluences?.length) o.frustumCulled = false;
     record.meshes.push(o); o.userData.originalMaterial = o.material;
     record.vertices += o.geometry.attributes.position?.count || 0;
     record.triangles += (o.geometry.index?.count || o.geometry.attributes.position?.count || 0)/3 * (o.isInstancedMesh ? o.count : 1);
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
       materials.add(m);
+      if (glows(m)) record.maps.add('emissive');
       for (const [key, value] of Object.entries(m)) if (value?.isTexture) {
         textures.add(value);
         for (const [map, keys] of Object.entries(MAP_KEYS)) if (keys.includes(key)) record.maps.add(map);
@@ -181,6 +203,7 @@ function makeRecord(object, name) {
   record.objects = Math.max(record.objects, 1);
   record.triangles = Math.round(record.triangles);
   record.materials = materials.size; record.textures = textures.size;
+  record.clips = clipsOf(object); record.shapes = shapesOf(record.meshes);
   if(!record.meshes.length && !record.points) throw new Error('No triangle meshes found in this file.');
   const bound = new THREE.Box3().setFromObject(object);
   const size = bound.getSize(new THREE.Vector3());
@@ -217,13 +240,15 @@ function show(record, view = 'iso') {
     record.points && `${short(record.points)} points`,
   ].filter(Boolean).join('  ·  ');
   const rows = [['Objects', record.objects], ['Meshes', meshes.length], ['Materials', record.materials], ['Textures', record.textures],
-    ['Vertices', record.vertices], ['Triangles', record.triangles], record.points && ['Points', record.points], ['Size', dims(record.size)]];
+    ['Vertices', record.vertices], ['Triangles', record.triangles], record.points && ['Points', record.points],
+    record.clips.length && ['Animations', record.clips.length], record.shapes.size && ['Blend shapes', record.shapes.size], ['Size', dims(record.size)]];
   $('info').replaceChildren(...rows.filter(Boolean).flatMap(([k, v]) => {
     const dt = document.createElement('dt'), dd = document.createElement('dd');
     dt.textContent = k; dd.textContent = typeof v === 'number' ? v.toLocaleString() : v; dd.dataset.info = k.toLowerCase();
     return [dt, dd];
   }));
   syncSampleUI();
+  motion.attach(record);
   applyMode(); fit(view); requestRender();
 }
 
@@ -252,6 +277,7 @@ function applyMode() {
       if(mode === 'material') {
         material = original.clone();
         for (const [map, keys] of Object.entries(MAP_KEYS)) if (!on[map]) for (const key of keys) if (key in material) material[key] = null;
+        if (!on.emissive && material.emissive) material.emissive.setHex(0);
       }
       else if(mode === 'raw') material = new THREE.MeshBasicMaterial({ color: original.color ?? 0xffffff, map: on.base ? original.map ?? null : null,
         vertexColors: hasColors, transparent: !!original.transparent, opacity: original.opacity ?? 1, alphaTest: original.alphaTest ?? 0, toneMapped: false });
@@ -437,7 +463,8 @@ async function loadFiles(files) {
       await paint();
       if(ext === 'glb' || ext === 'gltf') {
         const loader = new GLTFLoader(manager).setDRACOLoader(draco).setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
-        object = (await loader.parseAsync(bytes, '')).scene;
+        const gltf = await loader.parseAsync(bytes, '');
+        object = gltf.scene; object.animations = gltf.animations;
       }
       else if(ext === 'fbx') object = new FBXLoader(manager).parse(bytes, '');
       else if(ext === 'dae') object = new ColladaLoader(manager).parse(new TextDecoder().decode(bytes), '').scene;
@@ -483,6 +510,7 @@ $('files').onchange = e => loadFiles([...e.target.files]);
 for(const id of ['mode','wireframe','flat','twosided']) $(id).onchange = applyMode;
 for (const box of document.querySelectorAll('#maps input')) box.onchange = applyMode;
 const dropdowns = [dropdown($('mode')), dropdown($('lighting'))];
+motion = initMotion(requestRender);
 $('grid').onchange = () => grid.visible = $('grid').checked;
 $('spin').onchange = () => controls.autoRotate = $('spin').checked;
 $('fit').onclick = () => fit();
@@ -492,8 +520,8 @@ $('exposure').oninput = () => renderer.toneMappingExposure = Number($('exposure'
 $('lighting').onchange = () => {
   const preset = $('lighting').value;
   scene.environment = preset === 'studio' ? studio.texture : null;
-  hemi.intensity = preset === 'raking' ? .2 : preset === 'soft' ? 2.5 : 1.3;
-  lights.children.forEach((l,i) => l.intensity = preset === 'raking' ? [4,0,0][i] : preset === 'soft' ? [.7,.3,.4][i] : [2.5,1,2][i]);
+  hemi.intensity = preset === 'raking' ? .1 : preset === 'soft' ? 1.3 : .6;
+  lights.children.forEach((l,i) => l.intensity = preset === 'raking' ? [3,0,0][i] : preset === 'soft' ? [.5,.2,.3][i] : [1.8,.5,1.2][i]);
 };
 $('rotateLight').oninput = () => { lights.rotation.y = Number($('rotateLight').value); scene.environmentRotation.y = lights.rotation.y; };
 $('up').onclick = () => { holder.rotation.x -= Math.PI/2; fit('iso'); };
@@ -563,6 +591,7 @@ function selectAccent(name) {
   }
   background.setAccent(color);
   accentHex = color;
+  hemi.groundColor.copy(underlight(color)); lights.children[2].color.copy(rimlight(color));
   if (sample) { paintSample(sample.root, color); requestRender(); }
   try { localStorage.setItem('mobius-accent', label); } catch { /* Storage may be unavailable for local files. */ }
 }
@@ -639,6 +668,7 @@ $('reset').onclick = () => {
   for (const id of ['wireframe', 'flat', 'twosided', 'spin']) set(id, false);
   set('grid', true);
   for (const box of document.querySelectorAll('#maps input')) box.checked = true;
+  motion.reset();
   $('color-reset').click();
   selectAccent(ACCENTS[1][0]);
   dropdowns.forEach(d => d.sync());
@@ -662,6 +692,9 @@ window.mobiusDebug = {
     return [shown.meshes.length && plural(shown.triangles, 'triangle'), shown.meshes.length && plural(shown.vertices, 'vertex', 'vertices'),
       shown.meshes.length && plural(shown.meshes.length, 'mesh', 'meshes'), shown.points && plural(shown.points, 'point')].filter(Boolean).join('  ·  ');
   },
+  get playing() { return motion.playing; },
+  emissive: () => { const m = [meshes[0]?.material].flat()[0]; return m?.emissive ? m.emissive.getHexString() : null; },
+  influences: () => [...(meshes[0]?.morphTargetInfluences || [])].map(w => +w.toFixed(3)),
   materials: () => meshes.flatMap(m => [m.material].flat()).map(m => ({ type: m.type, wireframe: m.wireframe, flatShading: m.flatShading, side: m.side })),
   sampleTop: () => { const c = sample?.root.geometry.attributes.color; if (!c) return null; let i = 0, best = 0; const h = sample.root.geometry.userData.height; for (let j = 0; j < h.length; j++) if (h[j] > h[best]) best = j; i = best; return { r: +c.getX(i).toFixed(3), g: +c.getY(i).toFixed(3), b: +c.getZ(i).toFixed(3) }; },
   get shownAt() { return shownAt; },
