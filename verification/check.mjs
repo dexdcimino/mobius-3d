@@ -103,6 +103,16 @@ try {
   note(/28,800 triangles/.test(await stats()), `the sample knot reports "${await stats()}"`);
 
   // ---- 2. render on demand: an idle viewer draws NOTHING ------------------
+  // The sample's Wave plays on open (Dex, 2026-10-08), so it is drawing; a
+  // PAUSED viewer is the idle one, and it must stop.
+  // (After the shader compiles: on a software GPU that alone can take a second.)
+  await page.waitForTimeout(1500);
+  const p0 = await frame.evaluate(() => [window.mobiusDebug.playing, window.mobiusDebug.frames]);
+  await page.waitForTimeout(1500);
+  const p1 = await frame.evaluate(() => window.mobiusDebug.frames);
+  note(p0[0] && p1 > p0[1] + 2, `the sample's animation is not playing on open: playing=${p0[0]}, ${p1 - p0[1]} frames in 1.5s`);
+  console.log(`animation on open: ${p1 - p0[1]} frames in 1.5s`);
+  await frame.click('#anim-play');
   await page.waitForTimeout(1500);   // let the damping settle
   const f0 = await frame.evaluate(() => window.mobiusDebug.frames);
   await page.waitForTimeout(1500);
@@ -273,15 +283,16 @@ try {
   console.log(`screenshot: ${Math.round(pngBytes / 1024)} KB`);
 
   // ---- 10b. the controls (Dex, 2026-10-08) ---------------------------------
-  // Wireframe and flat shading must change what is DRAWN, which is why the
-  // knot came down from 768,000 triangles: at that density both looked like
+  // Wireframe must change what is DRAWN, which is why the
+  // knot came down from 768,000 triangles: at that density it looked like
   // nothing happened. Asserted on the materials actually on the mesh.
   {
     const materials = () => frame.evaluate(() => window.mobiusDebug.materials());
     await frame.click('label:has(#wireframe)');
-    await frame.click('label:has(#flat)');
     const m1 = await materials();
-    note(m1.length === 1 && m1[0].wireframe && m1[0].flatShading, `wireframe + flat on the knot: ${JSON.stringify(m1)}`);
+    note(m1.length === 1 && m1[0].wireframe, `wireframe on the knot: ${JSON.stringify(m1)}`);
+    // Flat shading was removed (Dex, 2026-10-08): no switch left behind.
+    note(!(await frame.$('#flat')), 'the Flat shading switch is still on the page');
     // The drawn dropdown: same width as its button, five one-or-two word modes.
     await frame.click('#mode-button');
     const dd = await frame.evaluate(() => {
@@ -322,10 +333,78 @@ try {
     const asked = await frame.textContent('#reset');
     await frame.click('#reset');
     const reset = await frame.evaluate(() => ({ mode: document.getElementById('mode').value, label: document.getElementById('mode-button').textContent,
-      wire: document.getElementById('wireframe').checked, flat: document.getElementById('flat').checked, accent: document.getElementById('accent-name').textContent }));
-    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && !reset.flat && reset.accent === 'Orange',
+      wire: document.getElementById('wireframe').checked, accent: document.getElementById('accent-name').textContent }));
+    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && reset.accent === 'Orange',
          `Reset: asked "${asked}", then ${JSON.stringify(reset)}`);
     console.log(`controls: ${shapes.map(s => s[0]).join(' / ')}; reset asked "${asked}"`);
+  }
+
+  // ---- 10c. animation, blend shapes, emissive (Dex, 2026-10-08) ------------
+  {
+    const state = () => frame.evaluate(() => ({
+      timeline: !document.getElementById('timeline').hidden, playing: window.mobiusDebug.playing,
+      clips: [...document.getElementById('anim-clip').options].map(o => o.textContent),
+      shapes: document.getElementById('shapes-section').hidden ? null : [...document.getElementById('shape-pick').options].map(o => o.textContent),
+      time: document.getElementById('anim-time').textContent, inf: window.mobiusDebug.influences(),
+    }));
+    // The sample: two clips, seven shapes, and a timeline clear of the panel.
+    // (Reset, just above, left it playing.)
+    if (!(await frame.evaluate(() => window.mobiusDebug.playing))) await frame.click('#anim-play');
+    const s0 = await state();
+    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge',
+         `the sample's motion: ${JSON.stringify(s0)}`);
+    const geo = await frame.evaluate(() => {
+      const t = document.getElementById('timeline').getBoundingClientRect(), a = document.querySelector('aside').getBoundingClientRect();
+      return { right: t.right, panel: a.left, bottom: innerHeight - t.bottom };
+    });
+    note(geo.right <= geo.panel - 8 && geo.bottom >= 8, `the timeline runs under the panel: ${JSON.stringify(geo)}`);
+    // Waited for, not slept: right after Reset the first frames wait on a
+    // shader compile, which on CI's software GPU outlasted a 400 ms sleep.
+    await frame.waitForFunction(t => document.getElementById('anim-time').textContent !== t, s0.time, { timeout: 10000 }).catch(() => {});
+    const s1 = await state();
+    note(s1.inf.join() !== s0.inf.join() && s1.time !== s0.time, `playing moved nothing: ${s0.time} -> ${s1.time}`);
+    // Pause holds the pose; scrubbing moves it while paused.
+    await frame.click('#anim-play');
+    const held = await state();
+    await page.waitForTimeout(400);
+    note(JSON.stringify((await state()).inf) === JSON.stringify(held.inf) && !held.playing, 'pause did not hold the pose');
+    await frame.evaluate(() => { const r = document.getElementById('anim-scrub'); r.value = '1'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+    const scrubbed = await state();
+    note(/^1\.00 \/ 4\.00 s$/.test(scrubbed.time) && scrubbed.inf.join() !== held.inf.join(), `scrubbing to 1s: ${JSON.stringify(scrubbed)}`);
+    // The clip list, from the drawn dropdown; speed 2x.
+    await frame.click('#anim-clip-button');
+    await frame.click('#anim-clip-list li:text-is("Pulse")');
+    const pulse = await state();
+    note(pulse.playing && /\/ 2\.00 s$/.test(pulse.time), `choosing Pulse: ${JSON.stringify(pulse)}`);
+    await frame.click('#anim-speed-button');
+    await frame.click('#anim-speed-list li:text-is("2×")');
+    note(await frame.evaluate(() => document.getElementById('anim-speed').value) === '2', 'the speed list did not take 2×');
+    // A blend shape slider pauses the clip and sets that one weight.
+    await frame.evaluate(() => { const r = document.getElementById('shape-weight'); r.value = '0.8'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+    const shaped = await state();
+    note(!shaped.playing && shaped.inf[0] === .8, `Bulge at 0.8: ${JSON.stringify(shaped)}`);
+    // Space plays and pauses.
+    await frame.focus('#capture'); await frame.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Space');
+    note(await frame.evaluate(() => window.mobiusDebug.playing), 'Space did not start the animation');
+    // An imported glTF with two clips and a blend shape; a still one hides it all.
+    await open('animated.glb');
+    const g = await state();
+    note(!(await card()) && g.timeline && g.playing && g.clips.join() === 'Spin,Raise' && g.shapes?.join() === 'Raise', `animated.glb: ${JSON.stringify(g)}`);
+    const info = await frame.evaluate(() => [document.querySelector('[data-info=animations]')?.textContent, document.querySelector('[data-info="blend shapes"]')?.textContent]);
+    note(info[0] === '2' && info[1] === '1', `Model info for animated.glb: ${JSON.stringify(info)}`);
+    // Emissive: the switch is live for a model that glows, and turns it off.
+    const emissive = () => frame.evaluate(() => window.mobiusDebug.emissive());
+    const lit = await emissive();
+    await frame.click('details:has(> summary:text-is("Textures")) > summary');
+    await frame.click('label:has([data-map=emissive])');
+    const dark = await emissive();
+    note(lit !== '000000' && lit !== null && dark === '000000', `the Emissive switch: ${lit} -> ${dark}`);
+    await open('triangle.glb');
+    const still = await state();
+    note(!still.timeline && still.shapes === null && !still.playing, `a still model: ${JSON.stringify(still)}`);
+    console.log(`motion: sample ${s0.clips.join('/')} with ${s0.shapes.length} shapes; animated.glb ${g.clips.join('/')}; emissive ${lit} -> ${dark}`);
+    await frame.click('#sample-toggle');
   }
 
   // ---- 11. the GPU dropping the context says so ----------------------------

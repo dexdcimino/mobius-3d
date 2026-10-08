@@ -19,9 +19,13 @@ Alembic (.abc), Unreal and Unity packages. A file whose bytes contradict its
 extension -- a renamed .blend, a text .gltf called .glb -- is also named for
 what it is.
 
-**Not supported:** animation playback, and reproducing every engine or DCC
-shader. This is a previewer: it shows the geometry, its normals, vertex colours
-and materials, and it never modifies the source file.
+**Animation:** the clips a glTF, FBX or Collada file carries (skinned,
+node and blend-shape animation) play on the timeline along the bottom, and its
+blend shapes (morph targets) each get a slider under Blend shapes.
+
+**Not supported:** reproducing every engine or DCC shader. This is a
+previewer: it shows the geometry, its normals, vertex colours, materials and
+motion, and it never modifies the source file.
 
 ## Selecting companion files
 
