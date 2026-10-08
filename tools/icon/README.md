@@ -1,5 +1,18 @@
 # The app icon
 
+Since 0.5.8 the icon is a piece of artwork, not a render: the green knot in
+`art.png`, cropped tight and set on a rounded plate by `art.py`.
+
+    python3 tools/icon/art.py      # build/icon.png, build/icon.ico, desktop/icon.png
+    python3 tools/icon/store.py    # build/appx/, cut from build/icon.png
+
+`build/icon.png` is 1024, `desktop/icon.png` and the site's copy are 512, and
+`build/icon.ico` carries 16 to 256. The portfolio's copy is
+`assets/icons/apps/mobius.png` there, the 512 from here.
+
+## The old rendered icon (before 0.5.8)
+
+
 The icon is a render of the sample knot in the viewer itself, not a painting:
 green, Ridges at 25%, paused on the Wave clip, seen three-quarters from above
 so all three openings show.
