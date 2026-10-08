@@ -358,7 +358,9 @@ try {
       return { right: t.right, panel: a.left, bottom: innerHeight - t.bottom };
     });
     note(geo.right <= geo.panel - 8 && geo.bottom >= 8, `the timeline runs under the panel: ${JSON.stringify(geo)}`);
-    await page.waitForTimeout(400);
+    // Waited for, not slept: right after Reset the first frames wait on a
+    // shader compile, which on CI's software GPU outlasted a 400 ms sleep.
+    await frame.waitForFunction(t => document.getElementById('anim-time').textContent !== t, s0.time, { timeout: 10000 }).catch(() => {});
     const s1 = await state();
     note(s1.inf.join() !== s0.inf.join() && s1.time !== s0.time, `playing moved nothing: ${s0.time} -> ${s1.time}`);
     // Pause holds the pose; scrubbing moves it while paused.
