@@ -67,8 +67,9 @@ compressed and failure fixtures.
 
 ## Install notes
 
-- **Windows**: the installer is unsigned, so SmartScreen may warn ("More info →
-  Run anyway"). It adds an **Open with Mobius 3D** entry for each format and
+- **Windows**: the Microsoft Store copy installs with no warning (see
+  [desktop/STORE.md](desktop/STORE.md)). The GitHub installer is unsigned, so
+  SmartScreen may warn about it ("More info → Run anyway"). It adds an **Open with Mobius 3D** entry for each format and
   never changes your default apps. It shows in the right-click **Open with**
   list, and as its own **Open with Mobius 3D** line under **Show more options**.
 - **Download links never go stale**: installers are named without a version
