@@ -17,7 +17,7 @@ import brand from '../desktop/brand.json';
 import { supported, extensionOf, nativeAdvice, sniffMismatch, fbxVersion } from './formats.js';
 import { showError, hideError, describeFailure } from './errors.js';
 import { DEFAULT_BACKGROUND, initBackground } from './background.js';
-import { ACCENTS, underlight, rimlight, underglow } from './accent.js';
+import { ACCENTS, DEFAULT_ACCENT, underlight, rimlight, underglow } from './accent.js';
 import { captureCamera } from './capture.js';
 import { SAMPLES, makeSample, paintSample } from './sample.js';
 import { dropdown } from './dropdown.js';
@@ -47,6 +47,8 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+// Three's default of 2 (one turn in 30 s) read as rushed; 30% slower.
+controls.autoRotateSpeed = 1.4;
 const studio = initStudio(renderer);
 scene.environmentIntensity = 1.1;
 const hemi = new THREE.HemisphereLight(0xffffff, 0x53596b, .3);
@@ -81,7 +83,7 @@ const holder = new THREE.Group(); scene.add(holder);
    record -- its wrapper, its meshes, its counts -- and `shown` is the one in
    the holder; root and meshes always describe that one. */
 let root = null, meshes = [], temporary = [], urls = [], busy = false;
-let shownAt = 0, sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = ACCENTS[1][1];
+let shownAt = 0, sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = DEFAULT_ACCENT[1];
 let contextLost = false;
 
 /* RENDER ON DEMAND. The original drew every frame forever, which with a heavy
@@ -594,7 +596,7 @@ if (new URLSearchParams(location.search).get('embed') === '1' && window.parent !
 const accents = ACCENTS;
 const swatchMark = initSwatchMark();
 function selectAccent(name) {
-  const [label, color] = accents.find(([label]) => label === name) || accents[1];
+  const [label, color] = accents.find(([label]) => label === name) || DEFAULT_ACCENT;
   $('accent-name').textContent = label;
   for (const button of $('accent-swatches').children) {
     button.setAttribute('aria-pressed', String(button.dataset.accent === label));
@@ -684,7 +686,7 @@ $('reset').onclick = () => {
   for (const box of document.querySelectorAll('#maps input')) box.checked = true;
   motion.reset();
   $('color-reset').click();
-  selectAccent(ACCENTS[1][0]);
+  selectAccent(DEFAULT_ACCENT[0]);
   dropdowns.forEach(d => d.sync());
   if (shown === sample && sampleKey !== 'knot') showSample('knot');
   else if (shown) { applyMode(); holder.rotation.set(0,0,0); fit(shown === sample ? SAMPLES[sampleKey].view : 'iso'); }

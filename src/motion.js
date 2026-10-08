@@ -65,6 +65,11 @@ export function initMotion(requestRender) {
   function hold() {
     for (const [name, w] of record?.held || []) for (const [mesh, index] of record.shapes.get(name) || []) mesh.morphTargetInfluences[index] = w;
   }
+  // A model's resting blend-shape weights, if it names any.
+  function rest() {
+    for (const [name, w] of Object.entries(record.root.userData.restShapes || {}))
+      for (const [mesh, index] of record.shapes.get(name) || []) mesh.morphTargetInfluences[index] = w;
+  }
   function useClip(index) {
     record.mixer.stopAllAction();
     record.clipIndex = index;
@@ -79,6 +84,7 @@ export function initMotion(requestRender) {
   function attach(next) {
     record = next;
     const clips = record?.clips || [], shapes = record?.shapes || new Map();
+    if (record && !record.rested) { record.rested = true; rest(); }
     $('timeline').hidden = !clips.length;
     document.body.classList.toggle('has-timeline', !!clips.length);
     if (clips.length) {
@@ -139,6 +145,7 @@ export function initMotion(requestRender) {
       if (!record) return;
       record.held?.clear();
       for (const pairs of record.shapes.values()) for (const [mesh, index] of pairs) mesh.morphTargetInfluences[index] = 0;
+      rest();
       if (record.clips.length) { $('anim-clip').value = '0'; clipList.sync(); useClip(0); record.autoplay = true; setPlaying(true); }
       showShape();
     },

@@ -6,6 +6,8 @@ export const ACCENTS = [
   ['Red', '#ff596a'], ['Orange', '#ff9932'], ['Gold', '#f0c600'],
   ['Green', '#00d285'], ['Blue', '#769cff'], ['Violet', '#b186ff'],
 ];
+// What a first visit, and Reset, starts on (Dex: green).
+export const DEFAULT_ACCENT = ACCENTS[3];
 export const luminance = c => .2126 * c.r + .7152 * c.g + .0722 * c.b;
 export const contrast = (a, b) => (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
 
@@ -48,7 +50,7 @@ function atLuminance(target, source) {
   return atLightness((low+high)/2,source);
 }
 
-export function gridPalette(backgroundHex, accentHex = ACCENTS[1][1]) {
+export function gridPalette(backgroundHex, accentHex = DEFAULT_ACCENT[1]) {
   const y = luminance(new THREE.Color(backgroundHex));
   const base = new THREE.Color(accentHex), source = toOklch(base);
   let major = base;
@@ -83,7 +85,7 @@ const towardHue = (h, target, max) => {
   return h + Math.sign(d) * Math.min(Math.abs(d), max);
 };
 const DEG = Math.PI / 180;
-export function sampleGradient(accentHex = ACCENTS[1][1]) {
+export function sampleGradient(accentHex = DEFAULT_ACCENT[1]) {
   const source = toOklch(new THREE.Color(accentHex));
   // Yellow only stays yellow light: held at L .7 like the rest, gold went olive.
   const yellow = Math.max(0, Math.cos(source.h - 95 * DEG)) ** 4;
@@ -94,19 +96,19 @@ export function sampleGradient(accentHex = ACCENTS[1][1]) {
 
 // The light from below: the hemisphere's ground colour, a dark version of the
 // accent instead of the grey-white that lit every underside the same.
-export function underlight(accentHex = ACCENTS[1][1]) {
+export function underlight(accentHex = DEFAULT_ACCENT[1]) {
   const source = toOklch(new THREE.Color(accentHex));
   return atLightness(.36, { L: .36, C: source.C * .8, h: source.h });
 }
 // The rim light behind the model: the accent, light but still saturated, so an
 // edge glows in the accent's colour. At C x .35 it read as white with a tint.
-export function rimlight(accentHex = ACCENTS[1][1]) {
+export function rimlight(accentHex = DEFAULT_ACCENT[1]) {
   const source = toOklch(new THREE.Color(accentHex));
   return atLightness(.8, { L: .8, C: source.C * .9, h: source.h });
 }
 // The direct light from underneath: the accent at full colour, a bounce off
 // a coloured floor.
-export function underglow(accentHex = ACCENTS[1][1]) {
+export function underglow(accentHex = DEFAULT_ACCENT[1]) {
   const source = toOklch(new THREE.Color(accentHex));
   return atLightness(.62, { L: .62, C: source.C * 1.1, h: source.h });
 }

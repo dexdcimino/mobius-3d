@@ -101,6 +101,9 @@ try {
   note(head.h1 === 'Mobius 3D' && /Mobius 3D/.test(head.title), `the header reads "${head.h1}" / "${head.title}"`);
   await frame.waitForFunction(() => /triangles/.test((window.mobiusDebug?.statsText || '')), null, { timeout: 30000 });
   note(/28,800 triangles/.test(await stats()), `the sample knot reports "${await stats()}"`);
+  // A first visit opens on green (Dex).
+  const first = await frame.evaluate(() => document.getElementById('accent-name').textContent);
+  note(first === 'Green', `a first visit's accent is ${first}`);
 
   // ---- 2. render on demand: an idle viewer draws NOTHING ------------------
   // The sample's Wave plays on open (Dex, 2026-10-08), so it is drawing; a
@@ -345,7 +348,7 @@ try {
     await frame.click('#reset');
     const reset = await frame.evaluate(() => ({ mode: document.getElementById('mode').value, label: document.getElementById('mode-button').textContent,
       wire: document.getElementById('wireframe').checked, accent: document.getElementById('accent-name').textContent }));
-    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && reset.accent === 'Orange',
+    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && reset.accent === 'Green',
          `Reset: asked "${asked}", then ${JSON.stringify(reset)}`);
     console.log(`controls: ${shapes.map(s => s[0]).join(' / ')}; reset asked "${asked}"`);
   }
@@ -362,7 +365,7 @@ try {
     // (Reset, just above, left it playing.)
     if (!(await frame.evaluate(() => window.mobiusDebug.playing))) await frame.click('#anim-play');
     const s0 = await state();
-    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge',
+    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge' && s0.inf[1] === .8,
          `the sample's motion: ${JSON.stringify(s0)}`);
     const geo = await frame.evaluate(() => {
       const t = document.getElementById('timeline').getBoundingClientRect(), a = document.querySelector('aside').getBoundingClientRect();
