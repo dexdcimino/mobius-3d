@@ -39,7 +39,7 @@ await page.waitForTimeout(1200);
 // below the fold, so the two sections the video never touches start shut and
 // the panel is scrolled just far enough to show them.
 await page.evaluate(() => {
-  for (const d of document.querySelectorAll('#controls-panel details')) if (/^(Surface|Sample)$/.test(d.querySelector('summary').textContent)) d.open = false;
+  for (const d of document.querySelectorAll('#controls-panel .panel-controls > details')) if (/^(Surface|Model)$/.test(d.querySelector('summary').textContent)) d.open = false;
   document.querySelector('.background-row').scrollIntoView({ block: 'nearest', behavior: 'instant' });
 });
 await page.clock.pauseAt(Date.now() + 1000);

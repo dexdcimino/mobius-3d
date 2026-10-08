@@ -309,13 +309,28 @@ try {
          `Grayscale from the list: ${JSON.stringify(m2)}`);
     // Shift-click: a closed section opens all, an open one closes all.
     await frame.click('details:has(> summary:text-is("Lighting")) > summary', { modifiers: ['Shift'] });
-    const allOpen = await frame.evaluate(() => [...document.querySelectorAll('.panel-controls details')].every(d => d.open));
+    const allOpen = await frame.evaluate(() => [...document.querySelectorAll('.panel-controls > details')].every(d => d.open));
     await frame.click('details:has(> summary:text-is("Lighting")) > summary', { modifiers: ['Shift'] });
-    const allShut = await frame.evaluate(() => [...document.querySelectorAll('.panel-controls details')].every(d => !d.open));
+    const allShut = await frame.evaluate(() => [...document.querySelectorAll('.panel-controls > details')].every(d => !d.open));
     note(allOpen && allShut, `shift-click: all open ${allOpen}, all shut ${allShut}`);
     await frame.click('details:has(> summary:text-is("Surface")) > summary');
     // The Sample toggle and the four shapes, each repainting from the accent.
-    await frame.click('details:has(> summary:text-is("Sample")) > summary');
+    await frame.click('details:has(> summary:text-is("View")) > summary');
+    // The panel is FOUR sections now (Dex): Textures folds inside Surface,
+    // blend shapes and the info share Model, and the sample picks are a row of
+    // View. Its scrollbar has a gutter kept for it, so opening every section
+    // moves nothing sideways; and each divider runs from the accent.
+    const panel = await frame.evaluate(() => {
+      const p = document.querySelector('.panel-controls'), sum = document.querySelector('.panel-controls > details > summary');
+      const before = [p.clientWidth, sum.getBoundingClientRect().right];
+      for (const d of p.querySelectorAll(':scope > details')) d.open = true;
+      const after = [p.clientWidth, sum.getBoundingClientRect().right, p.scrollHeight > p.clientHeight];
+      for (const d of p.querySelectorAll(':scope > details')) d.open = d.querySelector('summary').textContent !== 'Lighting';
+      return { sections: [...p.querySelectorAll(':scope > details > summary')].map(s => s.textContent).join(), before, after,
+        divider: getComputedStyle(p.querySelector(':scope > details')).backgroundImage, sample: !document.getElementById('sample-section').hidden };
+    });
+    note(panel.sections === 'Surface,Model,Lighting,View' && panel.after[2] && panel.before[0] === panel.after[0] && panel.before[1] === panel.after[1]
+         && /^linear-gradient\(90deg, rgb/.test(panel.divider) && panel.sample, `the panel: ${JSON.stringify(panel)}`);
     const shapes = [];
     for (const k of ['mobius', 'shell', 'klein', 'knot']) {
       await frame.click(`[data-sample="${k}"]`);
@@ -429,6 +444,16 @@ try {
     note(!(await card()) && g.timeline && g.playing && g.clips.join() === 'Spin,Raise' && g.shapes?.join() === 'Raise', `animated.glb: ${JSON.stringify(g)}`);
     const info = await frame.evaluate(() => [document.querySelector('[data-info=animations]')?.textContent, document.querySelector('[data-info="blend shapes"]')?.textContent]);
     note(info[0] === '2' && info[1] === '1', `Model info for animated.glb: ${JSON.stringify(info)}`);
+    // Triangles, vertices and size (in metres, for a glTF) across, then the
+    // counts as two columns: objects, meshes, materials down the left.
+    const layout = await frame.evaluate(() => [...document.querySelectorAll('#info > div')].map(d => {
+      const r = d.getBoundingClientRect(); return [d.firstChild.textContent, d.classList.contains('wide'), Math.round(r.left), Math.round(r.top), d.lastChild.textContent];
+    }));
+    const [tri, vert, size, ...counts] = layout, col = i => counts.filter((_, j) => j % 2 === i);
+    note(tri[0] === 'Triangles' && vert[0] === 'Vertices' && size[0] === 'Size' && / m$/.test(size[4]) && tri[1] && size[1]
+         && col(0).map(c => c[0]).join() === 'Objects,Meshes,Materials' && col(1).map(c => c[0]).join() === 'Textures,Animations,Blend shapes'
+         && col(0).every(c => c[2] === col(0)[0][2]) && col(1).every(c => c[2] > col(0)[0][2]) && col(0).every((c, i) => c[3] === col(1)[i][3]),
+         `the Model info layout: ${JSON.stringify(layout)}`);
     // Emissive: the switch is live for a model that glows, and turns it off.
     const emissive = () => frame.evaluate(() => window.mobiusDebug.emissive());
     const lit = await emissive();
