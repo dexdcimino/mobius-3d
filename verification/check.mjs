@@ -204,19 +204,29 @@ try {
        it). The question is whether the MAIN THREAD was held, and the Long
        Tasks API answers exactly that: every task over 50 ms, with its length. */
     await frame.evaluate(() => {
-      window.__long = 0;
-      window.__obs = new PerformanceObserver(list => { for (const e of list.getEntries()) window.__long = Math.max(window.__long, e.duration); });
+      window.__long = []; 
+      window.__obs = new PerformanceObserver(list => { for (const e of list.getEntries()) window.__long.push([e.startTime, e.duration]); });
       window.__obs.observe({ type: 'longtask' });
     });
     const t0 = Date.now();
     await open(path);
     await page.waitForTimeout(800);   // the first draw lands after the load resolves
     const ms = Date.now() - t0;
-    const longest = await frame.evaluate(() => { window.__obs.disconnect(); return Math.round(window.__long); });
+    /* Split at the moment the model was handed to the scene: everything before
+       is reading, parsing and building -- what this check is about -- and
+       everything after is the first DRAW, which on a shared CI runner's
+       software GPU has measured 3.7 and 7.3 seconds for one frame of a million
+       triangles while the parse stayed off this thread. The draw is printed,
+       not gated: it measures the runner's CPU, not where the parse ran. */
+    const [longest, draw] = await frame.evaluate(() => {
+      window.__obs.disconnect();
+      const at = window.mobiusDebug.shownAt, max = list => Math.round(Math.max(0, ...list.map(e => e[1])));
+      return [max(window.__long.filter(e => e[0] < at)), max(window.__long.filter(e => e[0] >= at))];
+    });
     const s = await stats();
     const file = basename(path);
     note(new RegExp(`${tris} triangles`).test(s), `${file}: stats "${s}" ${JSON.stringify(await card())}`);
-    console.log(`  ${file}: ${s.split('·')[0].trim()} in ${ms} ms, longest main-thread task ${longest} ms`);
+    console.log(`  ${file}: ${s.split('·')[0].trim()} in ${ms} ms, longest main-thread task ${longest} ms before the scene, ${draw} ms drawing`);
     /* What is allowed: building the scene and the first draw of the uploaded
        geometry, each a few hundred ms on a SOFTWARE GPU. What is refused: the
        parse itself on this thread -- seconds, in one task. */

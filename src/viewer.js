@@ -64,7 +64,7 @@ const holder = new THREE.Group(); scene.add(holder);
    record -- its wrapper, its meshes, its counts -- and `shown` is the one in
    the holder; root and meshes always describe that one. */
 let root = null, meshes = [], temporary = [], urls = [], busy = false;
-let sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = ACCENTS[1][1];
+let shownAt = 0, sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = ACCENTS[1][1];
 let contextLost = false;
 
 /* RENDER ON DEMAND. The original drew every frame forever, which with a heavy
@@ -203,6 +203,7 @@ function show(record, view = 'iso') {
   holder.clear(); holder.rotation.set(0,0,0);
   holder.add(record.wrapper);
   shown = record; root = record.root; meshes = record.meshes;
+  shownAt = performance.now();
   $('empty').hidden = true;
   $('capture').disabled = false;
   $('model-info').hidden = false;
@@ -663,6 +664,7 @@ window.mobiusDebug = {
   },
   materials: () => meshes.flatMap(m => [m.material].flat()).map(m => ({ type: m.type, wireframe: m.wireframe, flatShading: m.flatShading, side: m.side })),
   sampleTop: () => { const c = sample?.root.geometry.attributes.color; if (!c) return null; let i = 0, best = 0; const h = sample.root.geometry.userData.height; for (let j = 0; j < h.length; j++) if (h[j] > h[best]) best = j; i = best; return { r: +c.getX(i).toFixed(3), g: +c.getY(i).toFixed(3), b: +c.getZ(i).toFixed(3) }; },
+  get shownAt() { return shownAt; },
   get shown() { return shown === sample ? 'sample' : shown === imported && shown ? 'imported' : null; },
   loseContext: () => renderer.getContext().getExtension('WEBGL_lose_context')?.loseContext(),
   ktx2Ready: () => ktx2.init(),
