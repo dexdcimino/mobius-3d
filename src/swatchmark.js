@@ -1,19 +1,21 @@
-/* THE SELECTED-ACCENT MARK. In place of a dot and a ring, the chosen swatch
-   carries a small shape that morphs circle -> triangle -> square -> hexagon,
-   turning slowly all the while; at the hexagon it spins fast, comes back to a
-   circle as it slows, and the loop starts again.
+/* THE SELECTED-ACCENT MARK. The chosen swatch itself, not a shape inside it,
+   morphs circle -> triangle -> square -> hexagon, turning slowly all the
+   while; at the hexagon it spins fast, comes back to a circle as it slows, and
+   the loop starts again. The SVG covers the swatch exactly, the circle is the
+   swatch's own outline, and the round background is hidden under it.
 
    Every shape is drawn as the same 72 points at the same 72 angles, each at
    that shape's radius in that direction, so a morph is just a blend of two
    radii per point -- no path matching, and nothing pops. One SVG exists and
    moves to whichever swatch is pressed. It stops with the tab (rAF does), and
-   under reduced motion it holds still as a hexagon. */
+   under reduced motion it holds still as the plain circle. */
 
-const N = 72, R = 10;
+const N = 72, R = 12;
 // The radius of a regular n-gon, vertex up, in direction a; 0 sides is the
-// circle. Sizes are evened by eye: by circumradius alone the triangle looks
-// half the size of the circle.
-const SHAPES = [[0, .9], [3, 1.18], [4, 1.02], [6, .98]];
+// circle, at the swatch's own radius. Sizes are evened by eye: by
+// circumradius alone the triangle looks half the size of the circle, so its
+// corners reach a little past the swatch (the SVG lets them).
+const SHAPES = [[0, 1], [3, 1.2], [4, 1.06], [6, 1.02]];
 function radius([sides, scale], a) {
   if (!sides) return R * scale;
   const sector = Math.PI * 2 / sides;
@@ -67,7 +69,7 @@ export function initSwatchMark() {
   const draw = now => {
     frame = 0;
     if (!svg.isConnected) return;
-    if (still.matches) { path.setAttribute('d', pathAt(STEPS.reduce((t, [, , h, m]) => t + h + m, 0) + .25)); return; }
+    if (still.matches) { path.setAttribute('d', pathAt(0)); return; }
     path.setAttribute('d', pathAt((now - start) / 1000));
     frame = requestAnimationFrame(draw);
   };
