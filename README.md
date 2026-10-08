@@ -36,7 +36,7 @@ packages that folder; the website serves a copy of it. Edit `src/`, and:
 | to update | run | then |
 |---|---|---|
 | the website | `npm run site` | commit the portfolio's `mobius/` folder |
-| the desktop app | bump `version`, tag `vX.Y.Z`, push the tag | CI builds all three platforms and publishes a Release; installed apps update on next launch |
+| the desktop app | bump `version` and merge to main (or push a `vX.Y.Z` tag) | CI builds all three platforms and publishes a Release; installed apps update on next launch |
 
 ## Heavy models
 
