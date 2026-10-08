@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ACCENTS, gridPalette, luminance, contrast } from './accent.js';
+import { ACCENTS, DEFAULT_ACCENT, gridPalette, luminance, contrast } from './accent.js';
 export { gridPalette } from './accent.js';
 
 export const DEFAULT_BACKGROUND = '#0a1821';
@@ -29,7 +29,7 @@ export function initBackground(scene, grid) {
     // Migrate the previous default; retain every other custom background.
     if (hex === '#0b1b24') { hex = DEFAULT_BACKGROUND; localStorage.setItem('mobius-background',hex); }
   } catch { /* Best-effort persistence. */ }
-  let accent = ACCENTS[1][1];
+  let accent = DEFAULT_ACCENT[1];
   let hsv = hexToHsv(hex);
   const gridColors = grid.geometry.attributes.color;
   // Preserve the GridHelper's existing central axes versus minor line layout.

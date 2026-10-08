@@ -101,6 +101,9 @@ try {
   note(head.h1 === 'Mobius 3D' && /Mobius 3D/.test(head.title), `the header reads "${head.h1}" / "${head.title}"`);
   await frame.waitForFunction(() => /triangles/.test((window.mobiusDebug?.statsText || '')), null, { timeout: 30000 });
   note(/28,800 triangles/.test(await stats()), `the sample knot reports "${await stats()}"`);
+  // A first visit opens on green (Dex).
+  const first = await frame.evaluate(() => document.getElementById('accent-name').textContent);
+  note(first === 'Green', `a first visit's accent is ${first}`);
 
   // ---- 2. render on demand: an idle viewer draws NOTHING ------------------
   // The sample's Wave plays on open (Dex, 2026-10-08), so it is drawing; a
@@ -328,7 +331,13 @@ try {
     // tint, which is what Dex asked to be rid of -- and the room follows it.
     const lit = await frame.evaluate(() => window.mobiusDebug.lighting());
     const vivid = c => c[2] > c[0] && Math.max(...c) - Math.min(...c) > .3 * Math.max(...c);
-    note(vivid(lit.rim) && vivid(lit.under) && lit.shadow && lit.studio, `the lighting did not take the Blue accent: ${JSON.stringify(lit)}`);
+    note(vivid(lit.rim) && vivid(lit.under) && lit.shadow && lit.studio && lit.overGrid, `the lighting did not take the Blue accent: ${JSON.stringify(lit)}`);
+    // The chosen swatch carries the morphing mark, and it is moving.
+    const mk1 = await frame.evaluate(() => window.mobiusDebug.swatchMark);
+    await frame.waitForFunction(d => window.mobiusDebug.swatchMark.path !== d, mk1.path, { timeout: 8000 }).catch(() => {});
+    const mk2 = await frame.evaluate(() => window.mobiusDebug.swatchMark);
+    note(mk1.on === 'Blue' && mk2.on === 'Blue' && /^M[\d.]+ [\d.]+(L[\d.]+ [\d.]+){71}Z$/.test(mk2.path) && mk1.path !== mk2.path,
+         `the swatch mark: ${JSON.stringify([mk1.on, mk2.on, mk1.path?.slice(0, 30), mk2.path?.slice(0, 30)])}`);
     await frame.click('#sample-toggle');
     const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed'), shadow: window.mobiusDebug.lighting().shadow }));
     note(off.shown === null && off.empty && off.pressed === 'false' && !off.shadow, `Sample off with nothing imported: ${JSON.stringify(off)}`);
@@ -339,7 +348,7 @@ try {
     await frame.click('#reset');
     const reset = await frame.evaluate(() => ({ mode: document.getElementById('mode').value, label: document.getElementById('mode-button').textContent,
       wire: document.getElementById('wireframe').checked, accent: document.getElementById('accent-name').textContent }));
-    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && reset.accent === 'Orange',
+    note(asked === 'Sure?' && reset.mode === 'material' && reset.label === 'Material' && !reset.wire && reset.accent === 'Green',
          `Reset: asked "${asked}", then ${JSON.stringify(reset)}`);
     console.log(`controls: ${shapes.map(s => s[0]).join(' / ')}; reset asked "${asked}"`);
   }
@@ -356,7 +365,7 @@ try {
     // (Reset, just above, left it playing.)
     if (!(await frame.evaluate(() => window.mobiusDebug.playing))) await frame.click('#anim-play');
     const s0 = await state();
-    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge',
+    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge' && s0.inf[1] === .8,
          `the sample's motion: ${JSON.stringify(s0)}`);
     const geo = await frame.evaluate(() => {
       const t = document.getElementById('timeline').getBoundingClientRect(), a = document.querySelector('aside').getBoundingClientRect();
@@ -384,12 +393,21 @@ try {
     await frame.click('#anim-speed-button');
     await frame.click('#anim-speed-list li:text-is("2×")');
     note(await frame.evaluate(() => document.getElementById('anim-speed').value) === '2', 'the speed list did not take 2×');
-    // A blend shape slider pauses the clip and sets that one weight.
+    // A blend shape slider does NOT pause the clip (Dex): Pulse keys Bulge and
+    // Ridges, and with Bulge held at 0.8 the clip plays on -- the time moves,
+    // Ridges keeps moving, and Bulge stays where the slider put it.
     await frame.evaluate(() => { const r = document.getElementById('shape-weight'); r.value = '0.8'; r.dispatchEvent(new Event('input', { bubbles: true })); });
     const shaped = await state();
-    note(!shaped.playing && shaped.inf[0] === .8, `Bulge at 0.8: ${JSON.stringify(shaped)}`);
-    // Space plays and pauses.
+    // Waited for: Ridges is a sine, and two reads a fixed time apart can land
+    // on the same value either side of its peak.
+    await frame.waitForFunction(w => window.mobiusDebug.influences()[1] !== w, shaped.inf[1], { timeout: 10000 }).catch(() => {});
+    const later = await state();
+    note(shaped.playing && later.playing && later.time !== shaped.time && shaped.inf[0] === .8 && later.inf[0] === .8 && later.inf[1] !== shaped.inf[1],
+         `Bulge held at 0.8 while Pulse plays: ${JSON.stringify([shaped, later])}`);
+    // Space pauses and plays.
     await frame.focus('#capture'); await frame.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Space');
+    note(!(await frame.evaluate(() => window.mobiusDebug.playing)), 'Space did not pause the animation');
     await page.keyboard.press('Space');
     note(await frame.evaluate(() => window.mobiusDebug.playing), 'Space did not start the animation');
     // An imported glTF with two clips and a blend shape; a still one hides it all.

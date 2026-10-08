@@ -17,12 +17,13 @@ import brand from '../desktop/brand.json';
 import { supported, extensionOf, nativeAdvice, sniffMismatch, fbxVersion } from './formats.js';
 import { showError, hideError, describeFailure } from './errors.js';
 import { DEFAULT_BACKGROUND, initBackground } from './background.js';
-import { ACCENTS, underlight, rimlight, underglow } from './accent.js';
+import { ACCENTS, DEFAULT_ACCENT, underlight, rimlight, underglow } from './accent.js';
 import { captureCamera } from './capture.js';
 import { SAMPLES, makeSample, paintSample } from './sample.js';
 import { dropdown } from './dropdown.js';
 import { initMotion, clipsOf, shapesOf } from './motion.js';
 import { initStudio, initContactShadow } from './studio.js';
+import { initSwatchMark } from './swatchmark.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -46,6 +47,8 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+// Three's default of 2 (one turn in 30 s) read as rushed; 30% slower.
+controls.autoRotateSpeed = 1.4;
 const studio = initStudio(renderer);
 scene.environmentIntensity = 1.1;
 const hemi = new THREE.HemisphereLight(0xffffff, 0x53596b, .3);
@@ -71,6 +74,7 @@ useRig('studio');
 const contact = initContactShadow(renderer, scene);
 const floor = contact.floor;
 const grid = new THREE.GridHelper(12, 24, 0x626eaa, 0x30395f);
+grid.renderOrder = -2;   // under the contact shadow, which draws over it -- see studio.js
 scene.add(grid);
 const background = initBackground(scene, grid);
 const holder = new THREE.Group(); scene.add(holder);
@@ -79,7 +83,7 @@ const holder = new THREE.Group(); scene.add(holder);
    record -- its wrapper, its meshes, its counts -- and `shown` is the one in
    the holder; root and meshes always describe that one. */
 let root = null, meshes = [], temporary = [], urls = [], busy = false;
-let shownAt = 0, sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = ACCENTS[1][1];
+let shownAt = 0, sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = DEFAULT_ACCENT[1];
 let contextLost = false;
 
 /* RENDER ON DEMAND. The original drew every frame forever, which with a heavy
@@ -590,11 +594,13 @@ if (new URLSearchParams(location.search).get('embed') === '1' && window.parent !
   });
 }
 const accents = ACCENTS;
+const swatchMark = initSwatchMark();
 function selectAccent(name) {
-  const [label, color] = accents.find(([label]) => label === name) || accents[1];
+  const [label, color] = accents.find(([label]) => label === name) || DEFAULT_ACCENT;
   $('accent-name').textContent = label;
   for (const button of $('accent-swatches').children) {
     button.setAttribute('aria-pressed', String(button.dataset.accent === label));
+    if (button.dataset.accent === label && !button.contains(swatchMark.svg)) swatchMark.place(button);
     button.style.setProperty('--swatch', accents.find(([name]) => name === button.dataset.accent)[1]);
   }
   background.setAccent(color);
@@ -680,7 +686,7 @@ $('reset').onclick = () => {
   for (const box of document.querySelectorAll('#maps input')) box.checked = true;
   motion.reset();
   $('color-reset').click();
-  selectAccent(ACCENTS[1][0]);
+  selectAccent(DEFAULT_ACCENT[0]);
   dropdowns.forEach(d => d.sync());
   if (shown === sample && sampleKey !== 'knot') showSample('knot');
   else if (shown) { applyMode(); holder.rotation.set(0,0,0); fit(shown === sample ? SAMPLES[sampleKey].view : 'iso'); }
@@ -715,7 +721,10 @@ window.mobiusDebug = {
   // back: with render-on-demand and no preserveDrawingBuffer the buffer is
   // only readable in the same task that drew it.
   render: () => renderer.render(scene, camera),
-  lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture }),
+  get swatchMark() { return { on: document.querySelector('.accent-mark')?.parentElement?.dataset.accent, path: swatchMark.path }; },
+  lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture,
+    // The shadow never shares a depth test with the grid, and draws after it.
+    overGrid: !floor.children[0].material.depthTest && floor.children[0].renderOrder > grid.renderOrder }),
 };
 if (window.mobiusDesktop) {
   let incoming = Promise.resolve();

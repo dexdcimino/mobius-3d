@@ -62,8 +62,15 @@ export function initContactShadow(renderer, scene) {
   const group = new THREE.Group(); group.position.y = .002;
   const target = new THREE.WebGLRenderTarget(RES, RES), blurTarget = new THREE.WebGLRenderTarget(RES, RES);
   target.texture.generateMipmaps = blurTarget.texture.generateMipmaps = false;
+  /* Drawn with NO depth test, straight after the grid and before the model
+     (renderOrder -1; the grid is -2), so the two never compete for the same
+     depth. Sharing the grid's plane, the winner changed pixel by pixel as the
+     camera moved -- the flicker across the grid lines while orbiting. It is in
+     the OPAQUE pass on purpose, with its own blending: as a transparent object
+     it would draw after the model, and over it. */
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE).rotateX(Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: target.texture, transparent: true, opacity: .95, depthWrite: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ map: target.texture, opacity: .95, toneMapped: false, depthTest: false, depthWrite: false,
+      blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor }));
   floor.scale.y = -1; floor.renderOrder = -1;
   group.add(floor);
   const blurPlane = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE).rotateX(Math.PI / 2));
