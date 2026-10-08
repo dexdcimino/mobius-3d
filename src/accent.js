@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 
+// The first set, OKLCH chroma x1.3 at 0.04 less lightness (Dex: a little more
+// saturated). Each still clears 4.5:1 against the #191322 ink.
 export const ACCENTS = [
-  ['Red', '#ff767f'], ['Orange', '#ffad66'], ['Gold', '#f5d567'],
-  ['Green', '#64d99c'], ['Blue', '#88aaff'], ['Violet', '#bb98ff'],
+  ['Red', '#ff596a'], ['Orange', '#ff9932'], ['Gold', '#f0c600'],
+  ['Green', '#00d285'], ['Blue', '#769cff'], ['Violet', '#b186ff'],
 ];
 export const luminance = c => .2126 * c.r + .7152 * c.g + .0722 * c.b;
 export const contrast = (a, b) => (Math.max(a, b) + .05) / (Math.min(a, b) + .05);

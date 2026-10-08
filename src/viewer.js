@@ -23,6 +23,7 @@ import { SAMPLES, makeSample, paintSample } from './sample.js';
 import { dropdown } from './dropdown.js';
 import { initMotion, clipsOf, shapesOf } from './motion.js';
 import { initStudio, initContactShadow } from './studio.js';
+import { initSwatchMark } from './swatchmark.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -71,6 +72,7 @@ useRig('studio');
 const contact = initContactShadow(renderer, scene);
 const floor = contact.floor;
 const grid = new THREE.GridHelper(12, 24, 0x626eaa, 0x30395f);
+grid.renderOrder = -2;   // under the contact shadow, which draws over it -- see studio.js
 scene.add(grid);
 const background = initBackground(scene, grid);
 const holder = new THREE.Group(); scene.add(holder);
@@ -590,11 +592,13 @@ if (new URLSearchParams(location.search).get('embed') === '1' && window.parent !
   });
 }
 const accents = ACCENTS;
+const swatchMark = initSwatchMark();
 function selectAccent(name) {
   const [label, color] = accents.find(([label]) => label === name) || accents[1];
   $('accent-name').textContent = label;
   for (const button of $('accent-swatches').children) {
     button.setAttribute('aria-pressed', String(button.dataset.accent === label));
+    if (button.dataset.accent === label && !button.contains(swatchMark.svg)) swatchMark.place(button);
     button.style.setProperty('--swatch', accents.find(([name]) => name === button.dataset.accent)[1]);
   }
   background.setAccent(color);
@@ -715,7 +719,10 @@ window.mobiusDebug = {
   // back: with render-on-demand and no preserveDrawingBuffer the buffer is
   // only readable in the same task that drew it.
   render: () => renderer.render(scene, camera),
-  lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture }),
+  get swatchMark() { return { on: document.querySelector('.accent-mark')?.parentElement?.dataset.accent, path: swatchMark.path }; },
+  lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture,
+    // The shadow never shares a depth test with the grid, and draws after it.
+    overGrid: !floor.children[0].material.depthTest && floor.children[0].renderOrder > grid.renderOrder }),
 };
 if (window.mobiusDesktop) {
   let incoming = Promise.resolve();

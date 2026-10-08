@@ -328,7 +328,13 @@ try {
     // tint, which is what Dex asked to be rid of -- and the room follows it.
     const lit = await frame.evaluate(() => window.mobiusDebug.lighting());
     const vivid = c => c[2] > c[0] && Math.max(...c) - Math.min(...c) > .3 * Math.max(...c);
-    note(vivid(lit.rim) && vivid(lit.under) && lit.shadow && lit.studio, `the lighting did not take the Blue accent: ${JSON.stringify(lit)}`);
+    note(vivid(lit.rim) && vivid(lit.under) && lit.shadow && lit.studio && lit.overGrid, `the lighting did not take the Blue accent: ${JSON.stringify(lit)}`);
+    // The chosen swatch carries the morphing mark, and it is moving.
+    const mk1 = await frame.evaluate(() => window.mobiusDebug.swatchMark);
+    await frame.waitForFunction(d => window.mobiusDebug.swatchMark.path !== d, mk1.path, { timeout: 8000 }).catch(() => {});
+    const mk2 = await frame.evaluate(() => window.mobiusDebug.swatchMark);
+    note(mk1.on === 'Blue' && mk2.on === 'Blue' && /^M[\d.]+ [\d.]+(L[\d.]+ [\d.]+){71}Z$/.test(mk2.path) && mk1.path !== mk2.path,
+         `the swatch mark: ${JSON.stringify([mk1.on, mk2.on, mk1.path?.slice(0, 30), mk2.path?.slice(0, 30)])}`);
     await frame.click('#sample-toggle');
     const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed'), shadow: window.mobiusDebug.lighting().shadow }));
     note(off.shown === null && off.empty && off.pressed === 'false' && !off.shadow, `Sample off with nothing imported: ${JSON.stringify(off)}`);
@@ -384,12 +390,21 @@ try {
     await frame.click('#anim-speed-button');
     await frame.click('#anim-speed-list li:text-is("2×")');
     note(await frame.evaluate(() => document.getElementById('anim-speed').value) === '2', 'the speed list did not take 2×');
-    // A blend shape slider pauses the clip and sets that one weight.
+    // A blend shape slider does NOT pause the clip (Dex): Pulse keys Bulge and
+    // Ridges, and with Bulge held at 0.8 the clip plays on -- the time moves,
+    // Ridges keeps moving, and Bulge stays where the slider put it.
     await frame.evaluate(() => { const r = document.getElementById('shape-weight'); r.value = '0.8'; r.dispatchEvent(new Event('input', { bubbles: true })); });
     const shaped = await state();
-    note(!shaped.playing && shaped.inf[0] === .8, `Bulge at 0.8: ${JSON.stringify(shaped)}`);
-    // Space plays and pauses.
+    // Waited for: Ridges is a sine, and two reads a fixed time apart can land
+    // on the same value either side of its peak.
+    await frame.waitForFunction(w => window.mobiusDebug.influences()[1] !== w, shaped.inf[1], { timeout: 10000 }).catch(() => {});
+    const later = await state();
+    note(shaped.playing && later.playing && later.time !== shaped.time && shaped.inf[0] === .8 && later.inf[0] === .8 && later.inf[1] !== shaped.inf[1],
+         `Bulge held at 0.8 while Pulse plays: ${JSON.stringify([shaped, later])}`);
+    // Space pauses and plays.
     await frame.focus('#capture'); await frame.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Space');
+    note(!(await frame.evaluate(() => window.mobiusDebug.playing)), 'Space did not pause the animation');
     await page.keyboard.press('Space');
     note(await frame.evaluate(() => window.mobiusDebug.playing), 'Space did not start the animation');
     // An imported glTF with two clips and a blend shape; a still one hides it all.

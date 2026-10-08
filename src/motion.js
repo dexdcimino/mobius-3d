@@ -59,6 +59,12 @@ export function initMotion(requestRender) {
     $('shape-weight').value = String(w);
     $('shape-value').textContent = w.toFixed(2);
   }
+  // A slider's weight, held over whatever the clip says for that shape: the
+  // clip keeps playing and every other shape keeps moving. Pausing on a drag
+  // made a shape impossible to tune against the motion it was part of.
+  function hold() {
+    for (const [name, w] of record?.held || []) for (const [mesh, index] of record.shapes.get(name) || []) mesh.morphTargetInfluences[index] = w;
+  }
   function useClip(index) {
     record.mixer.stopAllAction();
     record.clipIndex = index;
@@ -66,7 +72,7 @@ export function initMotion(requestRender) {
     record.action = record.mixer.clipAction(clip).play();
     $('anim-scrub').max = String(clip.duration);
     $('anim-scrub').step = String(Math.max(clip.duration / 1000, .001));
-    record.mixer.update(0);
+    record.mixer.update(0); hold();
     showTime(); showShape(); requestRender();
   }
 
@@ -89,7 +95,7 @@ export function initMotion(requestRender) {
     $('shapes-section').hidden = !shapes.size;
     $('shape-pick').replaceChildren(...[...shapes.keys()].map(name => new Option(name, name)));
     shapeList.rebuild();
-    $('shapes-note').textContent = shapes.size && clips.length ? 'Moving a slider pauses the animation.' : '';
+    $('shapes-note').textContent = shapes.size && clips.length ? 'A slider holds its shape while the animation plays on.' : '';
     showShape();
   }
 
@@ -101,16 +107,15 @@ export function initMotion(requestRender) {
   addEventListener('pointerup', () => { scrubbing = false; });
   scrub.oninput = () => {
     if (!record?.mixer) return;
-    record.mixer.setTime(Number(scrub.value));
+    record.mixer.setTime(Number(scrub.value)); hold();
     showTime(); showShape(); requestRender();
   };
   $('shape-pick').onchange = showShape;
   $('shape-weight').oninput = () => {
     if (!record) return;
-    // The clip would write over the slider on its next frame.
-    if (playing) { setPlaying(false); record.autoplay = false; }
     const w = Number($('shape-weight').value);
-    for (const [mesh, index] of record.shapes.get($('shape-pick').value) || []) mesh.morphTargetInfluences[index] = w;
+    (record.held ??= new Map()).set($('shape-pick').value, w);
+    hold();
     $('shape-value').textContent = w.toFixed(2);
     requestRender();
   };
@@ -124,7 +129,7 @@ export function initMotion(requestRender) {
     // Called once per drawn frame; true while something is moving.
     tick(seconds) {
       if (!playing || !record?.mixer || scrubbing) return false;
-      record.mixer.update(seconds * speed);
+      record.mixer.update(seconds * speed); hold();
       showTime();
       if (!$('shapes-section').hidden) showShape();
       return true;
@@ -132,6 +137,7 @@ export function initMotion(requestRender) {
     reset() {
       $('anim-speed').value = '1'; speed = 1; speedList.sync();
       if (!record) return;
+      record.held?.clear();
       for (const pairs of record.shapes.values()) for (const [mesh, index] of pairs) mesh.morphTargetInfluences[index] = 0;
       if (record.clips.length) { $('anim-clip').value = '0'; clipList.sync(); useClip(0); record.autoplay = true; setPlaying(true); }
       showShape();
