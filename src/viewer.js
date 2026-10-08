@@ -20,7 +20,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { DEFAULT_BACKGROUND, initBackground } from './background.js';
 import { ACCENTS } from './accent.js';
 import { captureCamera } from './capture.js';
-import { infinityRibbon, trefoilKnot } from './sample.js';
+import { SAMPLES, makeSample, paintSample } from './sample.js';
+import { dropdown } from './dropdown.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -58,8 +59,12 @@ const grid = new THREE.GridHelper(12, 24, 0x626eaa, 0x30395f);
 scene.add(grid);
 const background = initBackground(scene, grid);
 const holder = new THREE.Group(); scene.add(holder);
+/* TWO MODELS CAN BE LOADED AT ONCE: the sample and the one you opened. The
+   Sample button swaps which is on screen without reloading either. Each is a
+   record -- its wrapper, its meshes, its counts -- and `shown` is the one in
+   the holder; root and meshes always describe that one. */
 let root = null, meshes = [], temporary = [], urls = [], busy = false;
-let triangles = 0, vertexCount = 0, colored = 0, generatedNormals = 0, pointCount = 0;
+let shownAt = 0, sample = null, imported = null, shown = null, sampleKey = 'knot', accentHex = ACCENTS[1][1];
 let contextLost = false;
 
 /* RENDER ON DEMAND. The original drew every frame forever, which with a heavy
@@ -113,98 +118,162 @@ function fit(view) {
   requestRender();
 }
 
-function clearModel() {
-  temporary.forEach(m => m.dispose()); temporary = [];
+function disposeRecord(record) {
+  if (!record) return;
   const geometries = new Set(), materials = new Set(), textures = new Set();
-  root?.traverse(o => {
+  record.root.traverse(o => {
     if (o.geometry) geometries.add(o.geometry);
     const originals = o.userData.originalMaterial || o.material;
     if (originals) (Array.isArray(originals) ? originals : [originals]).forEach(m => materials.add(m));
   });
   materials.forEach(m => { Object.values(m).forEach(v => { if(v?.isTexture) textures.add(v); }); m.dispose(); });
   geometries.forEach(g => g.dispose()); textures.forEach(t => { t.source?.data?.close?.(); t.dispose(); });
-  holder.clear(); root = null; meshes = [];
+  record.wrapper.removeFromParent();
+}
+
+// Nothing on screen: the empty state. Neither model is thrown away.
+function showNothing() {
+  temporary.forEach(m => m.dispose()); temporary = [];
+  holder.clear(); root = null; meshes = []; shown = null;
   $('empty').hidden = false;
-  $('filename').textContent = $('stats').textContent = $('colors').textContent = $('normals').textContent = '';
+  $('filename').textContent = $('stats').textContent = $('info').textContent = $('maps-note').textContent = '';
   $('capture').disabled = true;
   $('model-info').hidden = true;
   grid.visible = $('grid').checked;
-  urls.forEach(u => URL.revokeObjectURL(u)); urls = [];
+  syncSampleUI();
   requestRender();
 }
 
-const plural = (n, one, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+// The imported model, and its blob URLs, gone for good.
+function clearModel() {
+  if (shown === imported) showNothing();
+  disposeRecord(imported); imported = null;
+  urls.forEach(u => URL.revokeObjectURL(u)); urls = [];
+}
 
-function setModel(object, name) {
-  root = object;
-  holder.rotation.set(0,0,0);
-  triangles = vertexCount = colored = generatedNormals = pointCount = 0;
-  root.traverse(o => {
-    if(o.isLight || o.isCamera) o.visible = false;
+const plural = (n, one, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+// 768000 -> 768K, 1234567 -> 1.23M: the header line is a glance, the panel has the exact number.
+const short = n => n < 1e3 ? String(n) : n < 1e6 ? `${+(n / 1e3).toFixed(n < 1e4 ? 1 : 0)}K` : `${+(n / 1e6).toFixed(n < 1e7 ? 2 : 1)}M`;
+const MAP_KEYS = { base: ['map'], normal: ['normalMap', 'bumpMap'], roughness: ['roughnessMap'], metalness: ['metalnessMap'],
+                   specular: ['specularMap', 'specularIntensityMap', 'specularColorMap'] };
+
+function makeRecord(object, name) {
+  const record = { root: object, name, meshes: [], triangles: 0, vertices: 0, points: 0, objects: 0, maps: new Set() };
+  const materials = new Set(), textures = new Set();
+  object.traverse(o => {
+    if(o.isLight || o.isCamera) { o.visible = false; return; }
+    if (o !== object && !o.isBone) record.objects++;
     // A point cloud is shown as points, and counted as points.
-    if (o.isPoints) { pointCount += o.geometry.attributes.position?.count || 0; return; }
+    if (o.isPoints) { record.points += o.geometry.attributes.position?.count || 0; return; }
     if (!o.isMesh) return;
-    if(o.userData.generatedNormals) generatedNormals++;
-    else if(!o.geometry.attributes.normal) { o.geometry.computeVertexNormals(); generatedNormals++; }
-    meshes.push(o); o.userData.originalMaterial = o.material;
-    vertexCount += o.geometry.attributes.position?.count || 0;
-    triangles += (o.geometry.index?.count || o.geometry.attributes.position?.count || 0)/3 * (o.isInstancedMesh ? o.count : 1);
-    if(o.geometry.attributes.color) colored++;
+    if(!o.userData.generatedNormals && !o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+    record.meshes.push(o); o.userData.originalMaterial = o.material;
+    record.vertices += o.geometry.attributes.position?.count || 0;
+    record.triangles += (o.geometry.index?.count || o.geometry.attributes.position?.count || 0)/3 * (o.isInstancedMesh ? o.count : 1);
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      materials.add(m);
+      for (const [key, value] of Object.entries(m)) if (value?.isTexture) {
+        textures.add(value);
+        for (const [map, keys] of Object.entries(MAP_KEYS)) if (keys.includes(key)) record.maps.add(map);
+      }
+    }
   });
-  if(!meshes.length && !pointCount) throw new Error('No triangle meshes found in this file.');
-  const bound = new THREE.Box3().setFromObject(root);
+  record.objects = Math.max(record.objects, 1);
+  record.triangles = Math.round(record.triangles);
+  record.materials = materials.size; record.textures = textures.size;
+  if(!record.meshes.length && !record.points) throw new Error('No triangle meshes found in this file.');
+  const bound = new THREE.Box3().setFromObject(object);
   const size = bound.getSize(new THREE.Vector3());
   const max = Math.max(size.x, size.y, size.z);
   if(!Number.isFinite(max) || max <= 0) throw new Error('The model has empty or invalid geometry.');
+  record.size = size;
   // Normalize a wrapper, preserving the imported object's transforms and normals.
-  const wrapper = new THREE.Group(); wrapper.add(root); wrapper.scale.setScalar(3/max);
+  const wrapper = new THREE.Group(); wrapper.add(object); wrapper.scale.setScalar(3/max);
   wrapper.updateMatrixWorld(true);
   const normalized = new THREE.Box3().setFromObject(wrapper);
   const center = normalized.getCenter(new THREE.Vector3());
   wrapper.position.set(-center.x, -normalized.min.y, -center.z);
-  holder.add(wrapper);
+  record.wrapper = wrapper;
+  return record;
+}
+
+const dims = v => [v.x, v.y, v.z].map(n => +n.toPrecision(3)).join(' × ');
+function show(record, view = 'iso') {
+  temporary.forEach(m => m.dispose()); temporary = [];
+  holder.clear(); holder.rotation.set(0,0,0);
+  holder.add(record.wrapper);
+  shown = record; root = record.root; meshes = record.meshes;
+  shownAt = performance.now();
   $('empty').hidden = true;
   $('capture').disabled = false;
   $('model-info').hidden = false;
   grid.visible = $('grid').checked;
-  $('filename').textContent = name;
+  $('filename').textContent = record.name;
+  $('filename').title = record.name;
   $('stats').textContent = [
-    meshes.length && plural(Math.round(triangles), 'triangle'),
-    meshes.length && plural(vertexCount, 'vertex', 'vertices'),
+    meshes.length && `${short(record.triangles)} tris`,
+    meshes.length && `${short(record.vertices)} verts`,
     meshes.length && plural(meshes.length, 'mesh', 'meshes'),
-    pointCount && plural(pointCount, 'point'),
+    record.points && `${short(record.points)} points`,
   ].filter(Boolean).join('  ·  ');
-  $('colors').textContent = `${colored} of ${meshes.length} meshes have vertex colors`;
-  $('normals').textContent = generatedNormals ? `${generatedNormals} meshes lacked normals; generated for display.` : 'Imported normals preserved — original hard/smooth shading.';
-  applyMode(); fit('iso'); requestRender();
+  const rows = [['Objects', record.objects], ['Meshes', meshes.length], ['Materials', record.materials], ['Textures', record.textures],
+    ['Vertices', record.vertices], ['Triangles', record.triangles], record.points && ['Points', record.points], ['Size', dims(record.size)]];
+  $('info').replaceChildren(...rows.filter(Boolean).flatMap(([k, v]) => {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = k; dd.textContent = typeof v === 'number' ? v.toLocaleString() : v; dd.dataset.info = k.toLowerCase();
+    return [dt, dd];
+  }));
+  syncSampleUI();
+  applyMode(); fit(view); requestRender();
 }
 
+function setModel(object, name) { imported = makeRecord(object, name); show(imported); }
+
+/* SHADING is one list. Material: the file's own materials, with each texture
+   map switchable below. Unlit: no lighting at all -- base colour, its texture
+   and vertex colours as they are. Vertex colors: those colours, lit. Grayscale:
+   one neutral material, to read the surface. Normals: directions as RGB.
+   Wireframe, flat and two-sided apply to every one of them. */
 function applyMode() {
   temporary.forEach(m => m.dispose()); temporary = [];
   const mode = $('mode').value;
-  $('textures').disabled = mode !== 'material';
+  const on = {};
+  for (const box of document.querySelectorAll('#maps input')) {
+    const map = box.dataset.map;
+    // Only the maps this model has, and only in the modes that draw textures.
+    box.disabled = !(mode === 'material' || (mode === 'raw' && map === 'base')) || (!!shown && !shown.maps.has(map));
+    on[map] = box.checked && !box.disabled;
+  }
   for (const mesh of meshes) {
     const originals = mesh.userData.originalMaterial;
+    const hasColors = !!mesh.geometry.attributes.color;
     const converted = (Array.isArray(originals) ? originals : [originals]).map(original => {
       let material;
       if(mode === 'material') {
         material = original.clone();
-        if (!$('textures').checked) for (const key of Object.keys(material)) {
-          if (material[key]?.isTexture) material[key] = null;
-        }
+        for (const [map, keys] of Object.entries(MAP_KEYS)) if (!on[map]) for (const key of keys) if (key in material) material[key] = null;
       }
-      else if(mode === 'raw') material = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: !!mesh.geometry.attributes.color, toneMapped: false });
-      else if(mode === 'vertex') material = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: !!mesh.geometry.attributes.color, roughness: .65, metalness: 0 });
+      else if(mode === 'raw') material = new THREE.MeshBasicMaterial({ color: original.color ?? 0xffffff, map: on.base ? original.map ?? null : null,
+        vertexColors: hasColors, transparent: !!original.transparent, opacity: original.opacity ?? 1, alphaTest: original.alphaTest ?? 0, toneMapped: false });
+      else if(mode === 'vertex') material = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: hasColors, roughness: .65, metalness: 0 });
       else if(mode === 'normal') material = new THREE.MeshNormalMaterial();
       else material = new THREE.MeshStandardMaterial({ color: 0xa7abb3, roughness: .42, metalness: 0 });
       material.wireframe = $('wireframe').checked;
       material.flatShading = $('flat').checked || (mode === 'material' && !!original.flatShading);
       material.side = $('twosided').checked ? THREE.DoubleSide : original.side;
+      material.needsUpdate = true;
       temporary.push(material); return material;
     });
     mesh.material = Array.isArray(originals) ? converted : converted[0];
   }
-  $('hint').textContent = mode === 'raw' ? 'Unlit vertex colors. No textures or material tint. Meshes without colors appear white.' : mode === 'clay' ? 'Gray inspection material reveals the imported surface shading.' : mode === 'normal' ? 'Surface normals shown as RGB directions.' : mode === 'vertex' ? 'Vertex colors with studio lighting. Meshes without colors appear white.' : 'Imported materials, textures, and vertex colors.';
+  if (shown) {
+    const found = [...shown.maps];
+    $('maps-note').textContent = !found.length ? 'This model has no texture maps.'
+      : mode === 'material' || mode === 'raw' ? '' : 'Texture maps show in Material and Unlit.';
+  }
+  $('maps').classList.toggle('off', mode !== 'material' && mode !== 'raw');
+  $('hint').textContent = mode === 'raw' ? 'Unlit: base colour, its texture and vertex colours, with no lighting.' : mode === 'clay' ? 'Gray inspection material reveals the imported surface shading.' : mode === 'normal' ? 'Surface normals shown as RGB directions.' : mode === 'vertex' ? 'Vertex colors with studio lighting. Meshes without colors appear white.' : 'Imported materials, with each texture map switchable.';
+  requestRender();
 }
 
 // ---- decoders, built once --------------------------------------------------
@@ -306,7 +375,7 @@ async function loadFiles(files) {
   cancelLoad = () => { token.cancelled = true; token.onCancel?.(); };
   const checkpoint = () => { if (token.cancelled) throw CANCELLED(); };
   busy = true; $('open').disabled = true; status('');
-  clearModel();
+  clearModel(); showNothing();
   showLoading(model.name, WORKER_FORMATS.has(ext));
   const exact = new Map(), basenames = new Map(), missing = new Set();
   const normalize = s => decodeURIComponent(s).replaceAll('\\','/').replace(/^\.\//,'').toLowerCase();
@@ -411,7 +480,9 @@ document.addEventListener('keydown', event => {
 
 $('open').onclick = () => window.mobiusDesktop ? window.mobiusDesktop.open().catch(error => status(error.message, true)) : $('files').click();
 $('files').onchange = e => loadFiles([...e.target.files]);
-for(const id of ['mode','wireframe','textures','flat','twosided']) $(id).onchange = applyMode;
+for(const id of ['mode','wireframe','flat','twosided']) $(id).onchange = applyMode;
+for (const box of document.querySelectorAll('#maps input')) box.onchange = applyMode;
+const dropdowns = [dropdown($('mode')), dropdown($('lighting'))];
 $('grid').onchange = () => grid.visible = $('grid').checked;
 $('spin').onchange = () => controls.autoRotate = $('spin').checked;
 $('fit').onclick = () => fit();
@@ -491,6 +562,8 @@ function selectAccent(name) {
     button.style.setProperty('--swatch', accents.find(([name]) => name === button.dataset.accent)[1]);
   }
   background.setAccent(color);
+  accentHex = color;
+  if (sample) { paintSample(sample.root, color); requestRender(); }
   try { localStorage.setItem('mobius-accent', label); } catch { /* Storage may be unavailable for local files. */ }
 }
 for (const [name, color] of accents) {
@@ -505,19 +578,77 @@ let savedAccent;
 try { savedAccent = localStorage.getItem('mobius-accent'); } catch { /* Use the default accent. */ }
 selectAccent(savedAccent);
 new ResizeObserver(resize).observe($('viewport'));
-resize(); clearModel(); applyMode(); fit('iso');
+resize(); showNothing(); fit('iso');
 status('');
-/* THE SAMPLES. ?sample=knot opens on the trefoil the mark is drawn from --
-   what the website preview passes, so a visitor with no model file of their
-   own still sees the viewer doing its job. The empty state offers the same. */
-const SAMPLES = { knot: [trefoilKnot, 'Trefoil knot (sample)', 'iso'], infinity: [infinityRibbon, 'Infinity ribbon (sample)', 'front'] };
-function loadSample(key) {
-  const [make, name, view] = SAMPLES[key] || SAMPLES.knot;
-  hideError(); clearModel(); setModel(make(), name); fit(view);
+/* THE SAMPLE is on when the viewer opens, so a visitor with no model of their
+   own still sees it work; opening a model turns it off, and the Sample button
+   swaps between the two from then on. ?sample=<key> picks the shape. */
+function syncSampleUI() {
+  const on = !!sample && shown === sample;
+  $('sample-toggle').setAttribute('aria-pressed', String(on));
+  $('sample-toggle').title = on ? (imported ? `Back to ${imported.name}` : 'Hide the sample model') : 'Show the sample model';
+  $('sample-section').hidden = !on;
+  for (const b of document.querySelectorAll('[data-sample]')) b.setAttribute('aria-pressed', String(b.dataset.sample === sampleKey));
 }
-$('load-sample').onclick = () => loadSample('knot');
+function showSample(key = sampleKey) {
+  if (busy) return;
+  hideError();
+  if (!sample || key !== sampleKey) {
+    if (shown === sample) showNothing();
+    disposeRecord(sample);
+    sampleKey = key in SAMPLES ? key : 'knot';
+    sample = makeRecord(makeSample(sampleKey, accentHex), SAMPLES[sampleKey].name);
+  }
+  show(sample, SAMPLES[sampleKey].view);
+}
+$('sample-toggle').onclick = () => {
+  if (shown === sample && sample) { if (imported) show(imported); else showNothing(); }
+  else showSample();
+};
+for (const b of document.querySelectorAll('[data-sample]')) b.onclick = () => showSample(b.dataset.sample);
+$('load-sample').onclick = () => showSample();
+
+/* SHIFT-CLICK A SECTION to open or close all of them: a closed one opens
+   every section, an open one closes every section. */
+for (const summary of document.querySelectorAll('.panel-controls summary')) summary.addEventListener('click', event => {
+  if (!event.shiftKey) return;
+  event.preventDefault();
+  const open = !summary.parentElement.open;
+  for (const d of document.querySelectorAll('.panel-controls details')) d.open = open;
+  requestRender();
+});
+
+/* RESET, armed like every destructive button on the site: the first press asks
+   "Sure?", a second within three seconds resets every option to its default.
+   The model on screen stays; only how it is shown goes back. */
+let resetArmed = 0;
+function disarmReset() { clearTimeout(resetArmed); resetArmed = 0; $('reset').classList.remove('armed'); $('reset').textContent = 'Reset'; }
+$('reset').onclick = () => {
+  if (!resetArmed) {
+    $('reset').classList.add('armed'); $('reset').textContent = 'Sure?';
+    resetArmed = setTimeout(disarmReset, 3000);
+    return;
+  }
+  disarmReset();
+  const set = (id, value, event = 'change') => {
+    const el = $(id);
+    if (el.type === 'checkbox') el.checked = value; else el.value = value;
+    el.dispatchEvent(new Event(event, { bubbles: true }));
+  };
+  set('mode', 'material'); set('lighting', 'studio'); set('rotateLight', 0, 'input'); set('exposure', 1, 'input');
+  for (const id of ['wireframe', 'flat', 'twosided', 'spin']) set(id, false);
+  set('grid', true);
+  for (const box of document.querySelectorAll('#maps input')) box.checked = true;
+  $('color-reset').click();
+  selectAccent(ACCENTS[1][0]);
+  dropdowns.forEach(d => d.sync());
+  if (shown === sample && sampleKey !== 'knot') showSample('knot');
+  else if (shown) { applyMode(); holder.rotation.set(0,0,0); fit(shown === sample ? SAMPLES[sampleKey].view : 'iso'); }
+};
+$('reset').onblur = disarmReset;
+
 const wantedSample = new URLSearchParams(location.search).get('sample');
-if (wantedSample in SAMPLES) loadSample(wantedSample);
+showSample(wantedSample in SAMPLES ? wantedSample : 'knot');
 requestRender();
 window.viewerReady = true;
 /* For the checks in verification/, and harmless to anyone else: how many
@@ -525,6 +656,16 @@ window.viewerReady = true;
    and a way to make the GPU drop the context, which nothing else can force. */
 window.mobiusDebug = {
   get frames() { return framesDrawn; },
+  // The exact counts, in words, for checks that need more than the header's "768K tris".
+  get statsText() {
+    if (!shown) return '';
+    return [shown.meshes.length && plural(shown.triangles, 'triangle'), shown.meshes.length && plural(shown.vertices, 'vertex', 'vertices'),
+      shown.meshes.length && plural(shown.meshes.length, 'mesh', 'meshes'), shown.points && plural(shown.points, 'point')].filter(Boolean).join('  ·  ');
+  },
+  materials: () => meshes.flatMap(m => [m.material].flat()).map(m => ({ type: m.type, wireframe: m.wireframe, flatShading: m.flatShading, side: m.side })),
+  sampleTop: () => { const c = sample?.root.geometry.attributes.color; if (!c) return null; let i = 0, best = 0; const h = sample.root.geometry.userData.height; for (let j = 0; j < h.length; j++) if (h[j] > h[best]) best = j; i = best; return { r: +c.getX(i).toFixed(3), g: +c.getY(i).toFixed(3), b: +c.getZ(i).toFixed(3) }; },
+  get shownAt() { return shownAt; },
+  get shown() { return shown === sample ? 'sample' : shown === imported && shown ? 'imported' : null; },
   loseContext: () => renderer.getContext().getExtension('WEBGL_lose_context')?.loseContext(),
   ktx2Ready: () => ktx2.init(),
   // A frame drawn NOW, in the caller's task, for checks that read the canvas

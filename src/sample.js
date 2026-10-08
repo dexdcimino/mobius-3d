@@ -1,58 +1,110 @@
 import * as THREE from 'three';
+import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
+import { sampleGradient } from './accent.js';
 
-// A half-twisted strip on a lifted figure-eight path. At the crossover, the
-// two centerline passes are 0.96 units apart versus a ribbon width of 0.36.
-export function infinityRibbon() {
-  const segments=256, across=6, width=.36, positions=[], colors=[], indices=[];
-  const stops=['#58c9f5','#ad86ed','#f4a785','#58c9f5'].map(c=>new THREE.Color(c));
-  for(let i=0;i<=segments;i++) {
-    const t=i/segments*Math.PI*2;
-    const center=new THREE.Vector3(2.3*Math.sin(t),.95*Math.sin(2*t),.48*Math.cos(t));
-    const tangent=new THREE.Vector3(2.3*Math.cos(t),1.9*Math.cos(2*t),-.48*Math.sin(t)).normalize();
-    const normal=new THREE.Vector3(-tangent.y,tangent.x,0).normalize();
-    const binormal=new THREE.Vector3().crossVectors(tangent,normal).normalize();
-    const direction=normal.multiplyScalar(Math.cos(t/2)).addScaledVector(binormal,Math.sin(t/2));
-    const phase=i/segments*3,stop=Math.min(2,Math.floor(phase));
-    const color=stops[stop].clone().lerp(stops[stop+1],phase-stop);
-    for(let j=0;j<=across;j++) {
-      const p=center.clone().addScaledVector(direction,(j/across-.5)*width);
-      positions.push(p.x,p.y,p.z);colors.push(color.r,color.g,color.b);
-      if(i<segments&&j<across){const a=i*(across+1)+j,b=a+across+1;indices.push(a,b,a+1,b,b+1,a+1);}
+/* THE SAMPLES. Four shapes a visitor with no model of their own can turn over,
+   each showing something a viewer has to get right: smooth curvature, a
+   one-sided band, an open shell seen from inside, a surface through itself.
+   Each is dense enough to look smooth and LIGHT enough that wireframe and flat
+   shading read. The first knot was 768,000 triangles, and at that density a
+   wireframe is a solid surface and flat shading looks the same as smooth --
+   which is exactly what it looked like: two toggles that did nothing. */
+
+// A: the trefoil the Mobius mark is drawn from.
+const knot = () => new THREE.TorusKnotGeometry(1, 0.34, 360, 40, 2, 3);
+
+// B: a Mobius band with real thickness -- a rounded slab swept round a circle
+// with one half twist. The profile is centrally symmetric, so after the half
+// turn point k of the last ring IS point k + N/2 of the first, and the band
+// closes on itself with no seam and no duplicated vertices.
+function mobius() {
+  const segments = 360, N = 48, R = 1.3, a = .6, b = .07;
+  const profile = [];
+  for (let k = 0; k < N; k++) {
+    const t = k / N * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+    profile.push([a * Math.sign(c) * Math.abs(c) ** .5, b * Math.sign(s) * Math.abs(s) ** .5]);
+  }
+  const positions = [], indices = [];
+  for (let i = 0; i < segments; i++) {
+    const u = i / segments * Math.PI * 2, ct = Math.cos(u / 2), st = Math.sin(u / 2);
+    for (const [x, y] of profile) {
+      const r = x * ct - y * st, h = x * st + y * ct;
+      positions.push((R + r) * Math.cos(u), h, (R + r) * Math.sin(u));
     }
   }
-  const geometry=new THREE.BufferGeometry();
-  geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
-  geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  geometry.setIndex(indices);geometry.computeVertexNormals();
-  // Match the seam's opposite orientation after the half twist.
-  const normals=geometry.attributes.normal;
-  for(let j=0;j<=across;j++) {
-    const a=j,b=segments*(across+1)+(across-j);
-    const n=new THREE.Vector3().fromBufferAttribute(normals,a).sub(new THREE.Vector3().fromBufferAttribute(normals,b)).normalize();
-    normals.setXYZ(a,n.x,n.y,n.z);normals.setXYZ(b,-n.x,-n.y,-n.z);
+  for (let i = 0; i < segments; i++) {
+    const last = i === segments - 1, ni = last ? 0 : i + 1, shift = last ? N / 2 : 0;
+    for (let k = 0; k < N; k++) {
+      const k1 = (k + 1) % N;
+      const a0 = i * N + k, a1 = i * N + k1, b0 = ni * N + (k + shift) % N, b1 = ni * N + (k1 + shift) % N;
+      indices.push(a0, a1, b0, a1, b1, b0);
+    }
   }
-  return new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.42,metalness:.08,side:THREE.DoubleSide}));
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  return geometry;
 }
 
-// The sample a visitor sees first: the trefoil the Mobius mark is drawn from,
-// in the mark's own red-to-orange, at a density that says something about the
-// viewer -- 768,000 triangles -- while still opening instantly on any GPU.
-export function trefoilKnot({ tubular = 2400, radial = 160 } = {}) {
-  const geometry = new THREE.TorusKnotGeometry(1, 0.34, tubular, radial, 2, 3);
-  const position = geometry.attributes.position;
-  const colors = new Float32Array(position.count * 3);
-  const red = new THREE.Color('#e8231c'), orange = new THREE.Color('#ff9a1f'), c = new THREE.Color();
-  for (let i = 0; i < position.count; i++) {
-    // Height decides the blend, as in the icon: red over the top, orange through
-    // the middle, red again underneath.
-    // Squared and capped, so red dominates as it does in the icon and orange
-    // is a band through the middle rather than the whole knot.
-    const t = Math.max(0, Math.min(1, 1 - Math.abs(position.getY(i) / 1.1)));
-    c.copy(red).lerp(orange, t * t * 0.9);
-    colors.set([c.r, c.g, c.b], i * 3);
+// C: a seashell -- a tube that widens as it winds, apex up, open at the mouth.
+// The standard parametric seashell, three turns.
+const shell = () => new ParametricGeometry((u, v, target) => {
+  const U = u * Math.PI * 2, V = v * Math.PI * 6, e = Math.exp(V / (Math.PI * 6)), c2 = Math.cos(U / 2) ** 2;
+  target.set(2 * (1 - e) * Math.cos(V) * c2, 1 - e * e + (e - 1) * Math.sin(U), 2 * (e - 1) * Math.sin(V) * c2);
+}, 64, 420);
+
+// D: a Klein bottle, the classic bottle immersion: the neck turns back and
+// passes through the body to join the base from inside.
+const klein = () => new ParametricGeometry((u, v, target) => {
+  u *= 2 * Math.PI; v *= 2 * Math.PI;
+  let x, z;
+  if (u < Math.PI) {
+    x = 3 * Math.cos(u) * (1 + Math.sin(u)) + 2 * (1 - Math.cos(u) / 2) * Math.cos(u) * Math.cos(v);
+    z = -8 * Math.sin(u) - 2 * (1 - Math.cos(u) / 2) * Math.sin(u) * Math.cos(v);
+  } else {
+    x = 3 * Math.cos(u) * (1 + Math.sin(u)) + 2 * (1 - Math.cos(u) / 2) * Math.cos(v + Math.PI);
+    z = -8 * Math.sin(u);
   }
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .32, metalness: .05 }));
-  mesh.name = 'Trefoil knot';
+  target.set(x, -z, -2 * (1 - Math.cos(u) / 2) * Math.sin(v));   // stood up: its length is the height
+}, 180, 96);
+
+export const SAMPLES = {
+  knot:   { make: knot,   name: 'Trefoil knot', view: 'iso',  side: THREE.FrontSide },
+  mobius: { make: mobius, name: 'Mobius band',  view: 'iso',  side: THREE.FrontSide },
+  shell:  { make: shell,  name: 'Seashell',     view: 'iso',  side: THREE.DoubleSide },
+  klein:  { make: klein,  name: 'Klein bottle', view: 'front', side: THREE.DoubleSide },
+};
+
+/* The colour is the ACCENT, as a two-stop gradient: light over the top, dark
+   underneath, the light end leaning warm and the dark end cool, the way paint
+   shifts hue as well as value. Each vertex keeps its 0..1 height, so a new
+   accent repaints in place without rebuilding anything. */
+export function paintSample(mesh, accentHex) {
+  const geometry = mesh.geometry, position = geometry.attributes.position;
+  let height = geometry.userData.height;
+  if (!height) {
+    geometry.computeBoundingBox();
+    const { min, max } = geometry.boundingBox, span = Math.max(max.y - min.y, 1e-6);
+    height = geometry.userData.height = new Float32Array(position.count);
+    for (let i = 0; i < position.count; i++) height[i] = (position.getY(i) - min.y) / span;
+  }
+  const { top, bottom } = sampleGradient(accentHex);
+  if (!geometry.attributes.color) geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(position.count * 3), 3));
+  const colors = geometry.attributes.color.array, c = new THREE.Color();
+  for (let i = 0; i < position.count; i++) {
+    const h = height[i], t = h * h * (3 - 2 * h);   // smoothstep: soft at both ends
+    c.copy(bottom).lerp(top, t);
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  geometry.attributes.color.needsUpdate = true;
+}
+
+export function makeSample(key, accentHex) {
+  const spec = SAMPLES[key] || SAMPLES.knot;
+  const geometry = spec.make();
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .38, metalness: .04, side: spec.side }));
+  mesh.name = spec.name;
+  paintSample(mesh, accentHex);
   return mesh;
 }

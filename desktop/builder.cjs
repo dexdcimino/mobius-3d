@@ -24,6 +24,8 @@ module.exports = {
   asar: true,
   // releaseType 'release': published as it builds. The default is a DRAFT,
   // which installed copies cannot see, so they would never update.
+  // The installers carry NO version in their names, so the website's download
+  // button can link releases/latest/download/<name> and never go stale.
   publish: [{ provider: 'github', owner: 'dexdcimino', repo: 'mobius-3d', releaseType: 'release' }],
 
   win: {
@@ -37,7 +39,7 @@ module.exports = {
   // a per-user verb and nothing else (see desktop/prepare.cjs).
   nsis: {
     oneClick: false, perMachine: false, allowElevation: false, allowToChangeInstallationDirectory: true,
-    runAfterFinish: true, include: 'desktop/shell.nsh', artifactName: 'Mobius-3D-Setup-${version}-${arch}.${ext}',
+    runAfterFinish: true, include: 'desktop/shell.nsh', artifactName: 'Mobius-3D-Setup-${arch}.${ext}',
     createDesktopShortcut: true, createStartMenuShortcut: true, shortcutName: brand.name,
   },
 
@@ -50,7 +52,7 @@ module.exports = {
     // with right-click > Open the first time, and cannot update itself.
     identity: null,
   },
-  dmg: { artifactName: 'Mobius-3D-${version}-mac.${ext}' },
+  dmg: { artifactName: 'Mobius-3D-mac.${ext}' },
 
   linux: {
     target: ['AppImage', 'deb'],
@@ -61,6 +63,6 @@ module.exports = {
     synopsis: 'A local 3D model viewer',
     fileAssociations: fileAssociations.map(a => ({ ...a, mimeType: mime[a.ext] })),
   },
-  appImage: { artifactName: 'Mobius-3D-${version}-${arch}.${ext}' },
-  deb: { artifactName: 'mobius-3d_${version}_${arch}.${ext}' },
+  appImage: { artifactName: 'Mobius-3D-${arch}.${ext}' },
+  deb: { artifactName: 'mobius-3d_${arch}.${ext}' },
 };

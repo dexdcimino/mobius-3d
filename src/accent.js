@@ -70,3 +70,19 @@ export function gridPalette(backgroundHex, accentHex = ACCENTS[1][1]) {
   const ink = contrast(luminance(major),luminance(new THREE.Color('#191322'))) >= 4.5 ? '#191322' : '#ffffff';
   return {minor,major,light,effectiveHex,ink,adjusted:effectiveHex!==accentHex.toLowerCase()};
 }
+
+// The sample model's two stops, from an accent. Light end: high lightness,
+// hue nudged toward yellow; dark end: low lightness, nudged toward blue-violet.
+// Chroma is held under the accent's own, so the model reads as a tinted
+// material rather than candy, whichever of the six it is.
+const towardHue = (h, target, max) => {
+  const d = Math.atan2(Math.sin(target - h), Math.cos(target - h));
+  return h + Math.sign(d) * Math.min(Math.abs(d), max);
+};
+const DEG = Math.PI / 180;
+export function sampleGradient(accentHex = ACCENTS[1][1]) {
+  const source = toOklch(new THREE.Color(accentHex));
+  const top = { L: .68, C: source.C * .75, h: towardHue(source.h, 100 * DEG, 12 * DEG) };
+  const bottom = { L: .30, C: source.C * .9, h: towardHue(source.h, 285 * DEG, 22 * DEG) };
+  return { top: atLightness(top.L, top), bottom: atLightness(bottom.L, bottom) };
+}

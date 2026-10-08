@@ -53,7 +53,7 @@ packages that folder; the website serves a copy of it. Edit `src/`, and:
 ```bash
 npm ci
 npm start            # build and open the desktop app
-npm run check        # build, then drive the viewer in Chrome -- 41 checks
+npm run check        # build, then drive the viewer in Chrome -- 49 checks
 npm run dist         # the installer for this machine, into release/
 ```
 
@@ -66,7 +66,11 @@ compressed and failure fixtures.
 
 - **Windows**: the installer is unsigned, so SmartScreen may warn ("More info →
   Run anyway"). It adds an **Open with Mobius 3D** entry for each format and
-  never changes your default apps. On Windows 11 it is under **Show more options**.
+  never changes your default apps. It shows in the right-click **Open with**
+  list, and as its own **Open with Mobius 3D** line under **Show more options**.
+- **Download links never go stale**: installers are named without a version
+  (`Mobius-3D-Setup-x64.exe`, `Mobius-3D-mac.dmg`, `Mobius-3D-x86_64.AppImage`),
+  so `releases/latest/download/<name>` always serves the newest one.
 - **macOS**: unsigned (no Apple Developer ID). Right-click the app → **Open**
   the first time. It cannot update itself; download new versions from Releases.
 - **Linux**: AppImage (self-updating) or .deb.
