@@ -2,16 +2,40 @@
 # machines and publishes them to this repo's Releases -- which is also where
 # installed copies look for their updates.
 #
-#   bump "version" in package.json, commit, then:
-#   git tag v0.3.1 && git push origin v0.3.1
+#   bump "version" in package.json and merge it to main. That is the whole
+#   step: a push to main whose version has no v<version> tag yet releases it,
+#   and electron-builder creates the tag with the release. Pushing a tag by
+#   hand (git tag v0.3.1 && git push origin v0.3.1) still works too. The main
+#   route exists because Claude sessions cannot push tags through their proxy.
 name: release
 on:
   push:
+    branches: [main]
     tags: ['v*']
 permissions:
   contents: write
 jobs:
+  # On main, release only a version that has not been released yet; every
+  # other push to main is a no-op here.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then echo release=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          v="v$(node -p "require('./package.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/$v" > /dev/null; then
+            echo "$v is already released"; echo release=false >> "$GITHUB_OUTPUT"
+          else
+            echo "releasing $v"; echo release=true >> "$GITHUB_OUTPUT"
+          fi
   build:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -25,8 +49,10 @@ jobs:
           cache: npm
       - run: npm ci
       # The tag and package.json must agree, or the updater compares the
-      # wrong versions and never offers the update.
+      # wrong versions and never offers the update. (On main the tag is made
+      # FROM package.json, so there is nothing to compare.)
       - name: Tag matches package.json
+        if: github.ref_type == 'tag'
         shell: bash
         run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
       - run: npm run release
