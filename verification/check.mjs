@@ -343,11 +343,13 @@ try {
     const whole = await frame.evaluate(() => {
       const b = document.querySelector('.accent-swatch[data-accent="Blue"]'), m = b.querySelector('.accent-mark');
       const br = b.getBoundingClientRect(), mr = m.getBoundingClientRect();
-      return { bg: getComputedStyle(b).backgroundColor, fill: getComputedStyle(m.querySelector('path')).fill, swatch: b.style.getPropertyValue('--swatch'),
-        fit: [mr.left - br.left, mr.top - br.top, mr.width - br.width, mr.height - br.height].map(n => Math.round(n)) };
+      // The swatch colour as this browser writes it, to compare like with like.
+      const probe = document.createElement('i'); probe.style.color = b.style.getPropertyValue('--swatch'); document.body.appendChild(probe);
+      const swatch = getComputedStyle(probe).color; probe.remove();
+      return { bg: getComputedStyle(b).backgroundColor, fill: getComputedStyle(m.querySelector('path')).fill, swatch,
+        fit: [mr.left - br.left, mr.top - br.top, mr.width - br.width, mr.height - br.height].map(n => +n.toFixed(2)) };
     });
-    const hexRgb = h => { const n = parseInt(h.trim().slice(1), 16); return `rgb(${n >> 16}, ${n >> 8 & 255}, ${n & 255})`; };
-    note(whole.bg === 'rgba(0, 0, 0, 0)' && whole.fit.every(n => n === 0) && whole.fill === hexRgb(whole.swatch),
+    note(/^(transparent|rgba\(0, 0, 0, 0\))$/.test(whole.bg) && whole.fit.every(n => Math.abs(n) <= 1) && whole.fill === whole.swatch,
          `the pressed swatch is not the mark itself: ${JSON.stringify(whole)}`);
     await frame.click('#sample-toggle');
     const off = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, empty: !document.getElementById('empty').hidden, pressed: document.getElementById('sample-toggle').getAttribute('aria-pressed'), shadow: window.mobiusDebug.lighting().shadow }));
@@ -489,5 +491,6 @@ try {
 }
 
 console.log(`\nmobius check: ${pass} passed${fail.length ? `, ${fail.length} FAILED` : ''}`);
-for (const f of fail) console.log(`  - ${f}`);
+// On GitHub the failures are annotations too, readable without the log.
+for (const f of fail) console.log(process.env.GITHUB_ACTIONS ? `::error::${f.replace(/\n/g, ' ')}` : `  - ${f}`);
 process.exit(fail.length ? 1 : 0);
