@@ -365,7 +365,7 @@ try {
     // (Reset, just above, left it playing.)
     if (!(await frame.evaluate(() => window.mobiusDebug.playing))) await frame.click('#anim-play');
     const s0 = await state();
-    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge' && s0.inf[1] === .8,
+    note(s0.timeline && s0.playing && s0.clips.join() === 'Wave,Pulse' && s0.shapes?.length === 7 && s0.shapes[0] === 'Bulge' && s0.inf[1] === .25,
          `the sample's motion: ${JSON.stringify(s0)}`);
     const geo = await frame.evaluate(() => {
       const t = document.getElementById('timeline').getBoundingClientRect(), a = document.querySelector('aside').getBoundingClientRect();

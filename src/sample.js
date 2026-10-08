@@ -203,9 +203,9 @@ export function makeSample(key, accentHex) {
   if (key === 'knot') addKnotShapes(geometry);
   const mesh = new THREE.Mesh(geometry, sampleMaterial(spec.side));
   mesh.name = spec.name;
-  // The knot opens fluted (Dex): Ridges at 80%, a resting weight rather than
+  // The knot opens lightly fluted: Ridges at 25% (80% read as too strong), a resting weight rather than
   // a held one, so Pulse, which keys Ridges, still moves it.
-  if (key === 'knot') { mesh.updateMorphTargets(); mesh.animations = knotClips(); mesh.userData.restShapes = { Ridges: .8 }; }
+  if (key === 'knot') { mesh.updateMorphTargets(); mesh.animations = knotClips(); mesh.userData.restShapes = { Ridges: .25 }; }
   paintSample(mesh, accentHex);
   return mesh;
 }
