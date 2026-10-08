@@ -88,8 +88,10 @@ else {
     /* UPDATES: the build pushed to GitHub Releases reaches this app on its own.
        Only in a packaged build, never in a test run. A failure is silent on
        purpose -- offline, or an unsigned macOS build that cannot self-update,
-       is still a working viewer, and a dialog about it would be noise. */
-    if (app.isPackaged && !process.env.MOBIUS_TEST_PROFILE) {
+       is still a working viewer, and a dialog about it would be noise.
+       A Microsoft Store install (process.windowsStore) is updated by the
+       Store, and must never replace itself with the GitHub installer. */
+    if (app.isPackaged && !process.windowsStore && !process.env.MOBIUS_TEST_PROFILE) {
       try {
         const { autoUpdater } = require('electron-updater');
         autoUpdater.checkForUpdatesAndNotify().catch(() => {});

@@ -19,3 +19,43 @@ jobs:
       - run: node verification/check.mjs
         env:
           CHROME: /usr/bin/google-chrome
+
+  # The Microsoft Store package builds, with a stand-in identity -- the real
+  # one in desktop/store.json is only needed for the package that goes up.
+  store-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:store
+        env:
+          MOBIUS_STORE_IDENTITY: Mobius3D.Check
+          MOBIUS_STORE_PUBLISHER: CN=00000000-0000-0000-0000-000000000000
+          MOBIUS_STORE_PUBLISHER_NAME: Check
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: The package is there and carries the icons and Open with entries
+        shell: pwsh
+        run: |
+          $appx = Get-Item release/Mobius-3D-Store.appx
+          "{0:N1} MB" -f ($appx.Length / 1MB)
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($appx.FullName)
+          $names = $zip.Entries.FullName
+          $manifest = New-Object IO.StreamReader(($zip.Entries | Where-Object FullName -eq 'AppxManifest.xml').Open())
+          $xml = $manifest.ReadToEnd(); $manifest.Close(); $zip.Dispose()
+          $assets = @($names | Where-Object { $_ -like 'assets/*' }).Count
+          $types = ([regex]::Matches($xml, '<uap:FileType>')).Count
+          "assets: $assets, file types: $types, resources.pri: $($names -contains 'resources.pri')"
+          if ($assets -lt 27) { throw "expected the 27 icons from build/appx, found $assets" }
+          if ($types -ne 13) { throw "expected 13 Open with file types, found $types" }
+          if (-not ($names -contains 'resources.pri')) { throw 'no resources.pri: the scaled icons were not indexed' }
+          if ($xml -notmatch 'Version="\d+\.\d+\.\d+\.0"') { throw 'the Store needs a version ending in .0' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mobius-3D-Store-check
+          path: release/Mobius-3D-Store.appx
+          retention-days: 7

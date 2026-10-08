@@ -60,3 +60,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No Apple Developer ID: build unsigned instead of failing.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+  # The Microsoft Store package, attached to the same Release for uploading in
+  # Partner Center (Dex: Apps and games > Mobius 3D > the submission's
+  # Packages page). Skipped until desktop/store.json carries the identity
+  # Partner Center gave the app. It is NOT something to install from GitHub:
+  # unsigned, Windows refuses it outside the Store.
+  store:
+    needs: [gate, build]
+    if: needs.gate.outputs.release == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: identity
+        shell: bash
+        run: echo "ready=$(node -p "Boolean(require('./desktop/store.json').identityName)")" >> "$GITHUB_OUTPUT"
+      - if: steps.identity.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.identity.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.identity.outputs.ready == 'true'
+        run: npm run dist:store
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - if: steps.identity.outputs.ready == 'true'
+        shell: bash
+        run: gh release upload "v$(node -p "require('./package.json').version")" release/Mobius-3D-Store.appx --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
