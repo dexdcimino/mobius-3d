@@ -25,6 +25,7 @@ import { initMotion, clipsOf, shapesOf } from './motion.js';
 import { initStudio, initContactShadow } from './studio.js';
 import { initSwatchMark } from './swatchmark.js';
 import { initUpdate } from './update.js';
+import { initGizmo } from './gizmo.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -47,6 +48,22 @@ $('viewport').appendChild(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
 const controls = new OrbitControls(camera, renderer.domElement);
+/* THE DEPTH RANGE FOLLOWS THE CAMERA. It was fixed at each fit, near a
+   ten-thousandth of the model and far a thousand times it: ten million to
+   one, which leaves a 24-bit depth buffer centimetres of resolution across a
+   head. Sockets, eyes and decals modelled a hair off the surface under them
+   -- the way ZBrush inflates a subtool -- flickered through it, worse the
+   further out you zoomed. Now near is a fiftieth of the distance to what you
+   are orbiting and far just clears the grid: a ratio of a few hundred, at
+   every zoom. Everything is scaled to 3 units and the grid is 12 wide, so a
+   reach of 20 past the target always covers the scene. */
+const SCENE_REACH = 20;
+function fitDepth(view = camera) {
+  const distance = view.position.distanceTo(controls.target);
+  const near = Math.max(distance / 50, 1e-4), far = distance + SCENE_REACH;
+  if (view.near === near && view.far === far) return;
+  view.near = near; view.far = far; view.updateProjectionMatrix();
+}
 controls.enableDamping = true;
 // Middle drag pans, as the right drag does: the way Blender and most DCC tools
 // move the view. Three's default makes it a second zoom; the wheel already is one.
@@ -109,7 +126,9 @@ function requestRender() {
     const animating = !!motion?.tick(seconds);
     const moving = controls.update();
     contact.update(holder, animating);
+    fitDepth();
     renderer.render(scene, camera);
+    gizmo.update();
     framesDrawn++;
     if (moving || controls.autoRotate || animating) { lastFrame = now; requestRender(); } else lastFrame = 0;
   });
@@ -137,12 +156,12 @@ function fit(view) {
   const radius = Math.max(size.length()/2, 0.01);
   const halfAngle = Math.min(THREE.MathUtils.degToRad(camera.fov/2), Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*framingAspect));
   const distance = radius / Math.sin(halfAngle) * 1.15;
-  const directions = { front: [0, 0, 1], side: [1, 0, 0], top: [0, 1, 0.0001], iso: [1, .65, 1] };
+  const directions = { front: [0, 0, 1], back: [0, 0, -1], side: [1, 0, 0], right: [1, 0, 0], left: [-1, 0, 0],
+                       top: [0, 1, 0.0001], bottom: [0, -1, 0.0001], iso: [1, .65, 1] };
   const direction = view ? new THREE.Vector3(...directions[view]) : camera.position.clone().sub(controls.target);
   if (direction.lengthSq() < 0.001) direction.set(1, .65, 1);
   controls.target.copy(center); camera.position.copy(center).add(direction.normalize().multiplyScalar(distance));
-  camera.near = Math.max(radius/10000, .00001); camera.far = radius * 1000;
-  camera.updateProjectionMatrix(); controls.minDistance = radius * .01; controls.maxDistance = radius * 100;
+  controls.minDistance = radius * .01; controls.maxDistance = radius * 100;
   controls.update();
   requestRender();
 }
@@ -162,7 +181,7 @@ function disposeRecord(record) {
 
 // Nothing on screen: the empty state. Neither model is thrown away.
 function showNothing() {
-  temporary.forEach(m => m.dispose()); temporary = [];
+  clearTemporary();
   holder.clear(); root = null; meshes = []; shown = null;
   floor.visible = false;
   $('empty').hidden = false;
@@ -237,7 +256,7 @@ function makeRecord(object, name) {
 
 const dims = v => [v.x, v.y, v.z].map(n => +n.toPrecision(3)).join(' × ');
 function show(record, view = 'iso') {
-  temporary.forEach(m => m.dispose()); temporary = [];
+  clearTemporary();
   holder.clear(); holder.rotation.set(0,0,0);
   holder.add(record.wrapper);
   shown = record; root = record.root; meshes = record.meshes;
@@ -276,7 +295,48 @@ function show(record, view = 'iso') {
   applyMode(); fit(view); requestRender();
 }
 
-function setModel(object, name) { imported = makeRecord(object, name); show(imported); }
+/* WHAT A FILE'S MATERIALS BECOME. FBX, OBJ, DAE and 3DS describe Phong and
+   Lambert surfaces, and those ignore the studio's environment entirely -- only
+   the four direct lights reached them, so an imported model sat in the dark
+   while the samples, which are PBR, were lit by the whole room. Each one is
+   made the PBR material it describes (roughness from its shininess), the way
+   Blender and every engine read these formats now.
+   And VERTEX COLOURS ARE THE COLOUR. A ZBrush export carries its polypaint as
+   vertex colours and writes a mid-grey diffuse (0.5, so 0.21 once linear) that
+   nothing about the model means; three multiplies the two, which made a
+   character a fifth as bright as it is in the game, in Unlit too. A grey base
+   colour on a vertex-coloured mesh with no colour map is dropped to white. A
+   HUED one is kept: that is somebody tinting on purpose. glTF is left exactly
+   as written: its spec says the factor multiplies, and its exporters mean it. */
+const LEGACY = new Set(['MeshPhongMaterial', 'MeshLambertMaterial']);
+const COPIED = ['name', 'color', 'map', 'normalMap', 'normalScale', 'bumpMap', 'bumpScale', 'emissive', 'emissiveMap', 'emissiveIntensity',
+  'alphaMap', 'aoMap', 'aoMapIntensity', 'lightMap', 'lightMapIntensity', 'displacementMap', 'displacementScale', 'displacementBias',
+  'opacity', 'transparent', 'alphaTest', 'side', 'vertexColors', 'flatShading', 'depthWrite', 'visible', 'userData'];
+function asPBR(material, coloured) {
+  let made = material;
+  if (LEGACY.has(material.type)) {
+    made = new THREE.MeshStandardMaterial();
+    for (const key of COPIED) if (material[key] !== undefined) made[key] = material[key]?.isColor || material[key]?.isVector2 ? material[key].clone() : material[key];
+    // Blinn-Phong's exponent to a GGX roughness; Lambert has no highlight at all.
+    const shininess = material.type === 'MeshPhongMaterial' ? material.shininess ?? 30 : 0;
+    made.roughness = THREE.MathUtils.clamp(Math.sqrt(2 / (shininess + 2)), .45, 1);
+    made.metalness = 0;
+    material.dispose();
+  }
+  const c = made.color;
+  if (coloured && made.vertexColors && c && !made.map && Math.abs(c.r - c.g) < .01 && Math.abs(c.g - c.b) < .01) c.setRGB(1, 1, 1);
+  return made;
+}
+function prepareImported(object, name) {
+  if (/\.(glb|gltf)$/i.test(name)) return;
+  object.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const coloured = !!o.geometry.attributes.color;
+    o.material = Array.isArray(o.material) ? o.material.map(m => asPBR(m, coloured)) : asPBR(o.material, coloured);
+  });
+}
+
+function setModel(object, name) { prepareImported(object, name); imported = makeRecord(object, name); show(imported); }
 
 /* SHADING is one list. Material: the file's own materials, with each texture
    map switchable below. Unlit: no lighting at all -- base colour, its texture
@@ -284,14 +344,51 @@ function setModel(object, name) { imported = makeRecord(object, name); show(impo
    one neutral material, to read the surface. Normals: directions as RGB.
    Wireframe and two-sided apply to every one of them. (A Flat shading switch
    was here; Dex had it taken out: beside Unlit it read as the same thing.) */
-function applyMode() {
+/* TOON: three's cel material with a three-step ramp -- shadow, mid, lit --
+   read with NEAREST filtering so the bands stay hard. One ramp, shared by
+   every toon material, made the first time Toon is picked. */
+let ramp = null, outlines = [];
+// The materials (and toon outlines) the current mode made, gone.
+function clearTemporary() {
   temporary.forEach(m => m.dispose()); temporary = [];
+  outlines.forEach(o => o.removeFromParent()); outlines = [];
+}
+/* THE INK LINE round a toon surface: the mesh again, pushed out along its
+   normals and drawn from the back in a dark ink, so only a rim shows round
+   the silhouette -- the inverted hull every cel-shaded game uses. It shares
+   the mesh's geometry, its skeleton and its blend-shape weights, so it moves
+   with it. Its width is set in WORLD units (every model is 3 units tall), so
+   a big file and a small one get the same line. */
+function addOutline(mesh, ink) {
+  const width = .012 / Math.max(mesh.matrixWorld.getMaxScaleOnAxis(), 1e-6);
+  const material = new THREE.MeshBasicMaterial({ color: ink, side: THREE.BackSide, toneMapped: false });
+  material.onBeforeCompile = shader => {
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
+      `vec3 transformed = vec3( position ) + normalize( normal ) * ${width.toExponential(4)};`);
+  };
+  material.customProgramCacheKey = () => `outline-${width.toExponential(4)}`;
+  let outline;
+  if (mesh.isSkinnedMesh) { outline = new THREE.SkinnedMesh(mesh.geometry, material); outline.bind(mesh.skeleton, mesh.bindMatrix); }
+  else if (mesh.isInstancedMesh) { outline = new THREE.InstancedMesh(mesh.geometry, material, mesh.count); outline.instanceMatrix = mesh.instanceMatrix; }
+  else outline = new THREE.Mesh(mesh.geometry, material);
+  if (mesh.morphTargetInfluences) { outline.morphTargetInfluences = mesh.morphTargetInfluences; outline.morphTargetDictionary = mesh.morphTargetDictionary; }
+  outline.frustumCulled = mesh.frustumCulled; outline.raycast = () => {};
+  mesh.add(outline); outlines.push(outline); temporary.push(material);
+}
+function toonRamp() {
+  if (ramp) return ramp;
+  ramp = new THREE.DataTexture(new Uint8Array([70, 160, 255]), 3, 1, THREE.RedFormat);
+  ramp.minFilter = ramp.magFilter = THREE.NearestFilter; ramp.generateMipmaps = false; ramp.needsUpdate = true;
+  return ramp;
+}
+function applyMode() {
+  clearTemporary();
   const mode = $('mode').value;
   const on = {};
   for (const box of document.querySelectorAll('#maps input')) {
     const map = box.dataset.map;
     // Only the maps this model has, and only in the modes that draw textures.
-    box.disabled = !(mode === 'material' || (mode === 'raw' && map === 'base')) || (!!shown && !shown.maps.has(map));
+    box.disabled = !(mode === 'material' || ((mode === 'raw' || mode === 'toon') && map === 'base')) || (!!shown && !shown.maps.has(map));
     on[map] = box.checked && !box.disabled;
   }
   for (const mesh of meshes) {
@@ -306,6 +403,8 @@ function applyMode() {
       }
       else if(mode === 'raw') material = new THREE.MeshBasicMaterial({ color: original.color ?? 0xffffff, map: on.base ? original.map ?? null : null,
         vertexColors: hasColors, transparent: !!original.transparent, opacity: original.opacity ?? 1, alphaTest: original.alphaTest ?? 0, toneMapped: false });
+      else if(mode === 'toon') material = new THREE.MeshToonMaterial({ color: original.color ?? 0xffffff, map: on.base ? original.map ?? null : null,
+        gradientMap: toonRamp(), vertexColors: hasColors, transparent: !!original.transparent, opacity: original.opacity ?? 1, alphaTest: original.alphaTest ?? 0 });
       else if(mode === 'vertex') material = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: hasColors, roughness: .65, metalness: 0 });
       else if(mode === 'normal') material = new THREE.MeshNormalMaterial();
       else material = new THREE.MeshStandardMaterial({ color: 0xa7abb3, roughness: .42, metalness: 0 });
@@ -316,16 +415,17 @@ function applyMode() {
       temporary.push(material); return material;
     });
     mesh.material = Array.isArray(originals) ? converted : converted[0];
+    if (mode === 'toon' && !$('wireframe').checked && mesh.geometry.attributes.normal) addOutline(mesh, 0x0a0d14);
   }
   const usable = [...document.querySelectorAll('#maps input')].filter(box => !box.disabled);
   $('maps-section').firstElementChild.dataset.count = !shown || !shown.maps.size ? 'None' : usable.length ? `${usable.filter(box => box.checked).length} of ${usable.length}` : 'Off';
   if (shown) {
     const found = [...shown.maps];
     $('maps-note').textContent = !found.length ? 'This model has no texture maps.'
-      : mode === 'material' || mode === 'raw' ? '' : 'Texture maps show in Material and Unlit.';
+      : mode === 'material' || mode === 'raw' || mode === 'toon' ? '' : 'Texture maps show in Material, Toon and Unlit.';
   }
-  $('maps').classList.toggle('off', mode !== 'material' && mode !== 'raw');
-  $('hint').textContent = mode === 'raw' ? 'Unlit: base colour, its texture and vertex colours, with no lighting.' : mode === 'clay' ? 'Gray inspection material reveals the imported surface shading.' : mode === 'normal' ? 'Surface normals shown as RGB directions.' : mode === 'vertex' ? 'Vertex colors with studio lighting. Meshes without colors appear white.' : 'Imported materials, with each texture map switchable.';
+  $('maps').classList.toggle('off', mode !== 'material' && mode !== 'raw' && mode !== 'toon');
+  $('hint').textContent = mode === 'toon' ? 'Toon: colours in three flat bands of light, the cel look.' : mode === 'raw' ? 'Unlit: base colour, its texture and vertex colours, with no lighting.' : mode === 'clay' ? 'Gray inspection material reveals the imported surface shading.' : mode === 'normal' ? 'Surface normals shown as RGB directions.' : mode === 'vertex' ? 'Vertex colors with studio lighting. Meshes without colors appear white.' : 'Imported materials, with each texture map switchable.';
   requestRender();
 }
 
@@ -607,6 +707,7 @@ if (new URLSearchParams(location.search).get('embed') === '1' && window.parent !
     }
   });
 }
+const gizmo = initGizmo({ camera, title: document.querySelector('header h1'), onView: view => fit(view) });
 const accents = ACCENTS;
 const swatchMark = initSwatchMark();
 function selectAccent(name) {
@@ -646,9 +747,11 @@ function syncSampleUI() {
   const on = !!sample && shown === sample;
   $('sample-toggle').setAttribute('aria-pressed', String(on));
   $('sample-toggle').title = on ? (imported ? `Back to ${imported.name}` : 'Hide the sample model') : 'Show the sample model';
-  $('sample-section').hidden = !on;
-  for (const b of document.querySelectorAll('[data-sample]')) b.setAttribute('aria-pressed', String(b.dataset.sample === sampleKey));
+  // The A-D row stays put whatever is on screen: opening a model only
+  // deselects it, and pressing the lit letter turns the sample off.
+  for (const b of document.querySelectorAll('[data-sample]')) b.setAttribute('aria-pressed', String(on && b.dataset.sample === sampleKey));
 }
+function hideSample() { if (imported) show(imported); else showNothing(); }
 function showSample(key = sampleKey) {
   if (busy) return;
   hideError();
@@ -660,11 +763,11 @@ function showSample(key = sampleKey) {
   }
   show(sample, SAMPLES[sampleKey].view);
 }
-$('sample-toggle').onclick = () => {
-  if (shown === sample && sample) { if (imported) show(imported); else showNothing(); }
-  else showSample();
+$('sample-toggle').onclick = () => { if (shown === sample && sample) hideSample(); else showSample(); };
+for (const b of document.querySelectorAll('[data-sample]')) b.onclick = () => {
+  if (busy) return;
+  if (shown === sample && sample && b.dataset.sample === sampleKey) hideSample(); else showSample(b.dataset.sample);
 };
-for (const b of document.querySelectorAll('[data-sample]')) b.onclick = () => showSample(b.dataset.sample);
 $('load-sample').onclick = () => showSample();
 
 /* SHIFT-CLICK A SECTION to open or close all of them: a closed one opens
@@ -726,6 +829,7 @@ window.mobiusDebug = {
   get playing() { return motion.playing; },
   emissive: () => { const m = [meshes[0]?.material].flat()[0]; return m?.emissive ? m.emissive.getHexString() : null; },
   influences: () => [...(meshes[0]?.morphTargetInfluences || [])].map(w => +w.toFixed(3)),
+  baseColors: () => meshes.flatMap(m => [m.material].flat()).map(m => m.color?.getHexString()),
   materials: () => meshes.flatMap(m => [m.material].flat()).map(m => ({ type: m.type, wireframe: m.wireframe, flatShading: m.flatShading, side: m.side })),
   sampleTop: () => { const c = sample?.root.geometry.attributes.color; if (!c) return null; let i = 0, best = 0; const h = sample.root.geometry.userData.height; for (let j = 0; j < h.length; j++) if (h[j] > h[best]) best = j; i = best; return { r: +c.getX(i).toFixed(3), g: +c.getY(i).toFixed(3), b: +c.getZ(i).toFixed(3) }; },
   get shownAt() { return shownAt; },
@@ -735,7 +839,10 @@ window.mobiusDebug = {
   // A frame drawn NOW, in the caller's task, for checks that read the canvas
   // back: with render-on-demand and no preserveDrawingBuffer the buffer is
   // only readable in the same task that drew it.
-  render: () => renderer.render(scene, camera),
+  render: () => { fitDepth(); renderer.render(scene, camera); },
+  get depthRange() { return [camera.near, camera.far]; },
+  get outlines() { return outlines.length; },
+  get gizmo() { return { side: gizmo.side, folded: gizmo.folded }; },
   get swatchMark() { return { on: document.querySelector('.accent-mark')?.parentElement?.dataset.accent, path: swatchMark.path }; },
   lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture,
     // The shadow never shares a depth test with the grid, and draws after it.

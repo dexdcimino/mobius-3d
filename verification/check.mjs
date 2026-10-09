@@ -146,6 +146,75 @@ try {
   await open('textured.obj', 'textured.mtl', 'checker.png');
   note(!(await card()) && /triangles/.test(await stats()), 'textured OBJ + MTL + PNG did not open');
 
+  // A ZBrush-style character: polypaint as vertex colours under a mid-grey
+  // Phong material, and black sockets 0.2% off the head. It used to come in at
+  // a fifth of its brightness, unlit by the studio, with the sockets flickering.
+  await open('character.fbx');
+  const character = await frame.evaluate(() => {
+    const select = document.getElementById('mode');
+    const pick = v => { select.value = v; select.dispatchEvent(new Event('change', { bubbles: true })); };
+    const materials = window.mobiusDebug.materials().map(m => m.type), colors = window.mobiusDebug.baseColors();
+    pick('raw');
+    window.mobiusDebug.render();
+    const gl = document.querySelector('canvas'), c = document.createElement('canvas');
+    c.width = gl.width; c.height = gl.height; c.getContext('2d').drawImage(gl, 0, 0);
+    const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let blue = 0, brightest = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 2] > 200 && px[i] < 60) blue++;
+      if (px[i + 2] > px[i] + 60) brightest = Math.max(brightest, px[i + 2]);
+    }
+    pick('material');
+    const [near, far] = window.mobiusDebug.depthRange;
+    const letters = [...document.querySelectorAll('[data-sample]')];
+    return { materials, colors, blue, brightest, ratio: far / near, row: !document.getElementById('sample-section').hidden,
+             pressed: letters.filter(b => b.getAttribute('aria-pressed') === 'true').length };
+  });
+  console.log(`character.fbx: ${JSON.stringify(character)}`);
+  note(character.materials.length && character.materials.every(t => t === 'MeshStandardMaterial'), `character.fbx: Phong not made PBR: ${character.materials}`);
+  note(character.colors.every(c => c === 'ffffff'), `character.fbx: the grey diffuse still tints the vertex colours: ${character.colors}`);
+  note(character.blue > 2000 && character.brightest > 240, `character.fbx: Unlit is not the polypaint's blue (${character.blue} px, peak ${character.brightest})`);
+  note(character.ratio < 1000, `character.fbx: depth range far/near is ${Math.round(character.ratio)}, the sockets will flicker`);
+  note(character.row && character.pressed === 0, `opening a model hid the sample row or left a letter lit: ${JSON.stringify(character)}`);
+  await frame.click('[data-sample=knot]');
+  const sampleOn = await frame.evaluate(() => window.mobiusDebug.shown);
+  await frame.click('[data-sample=knot]');
+  const sampleOff = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, lit: document.querySelector('[data-sample=knot]').getAttribute('aria-pressed') }));
+  note(sampleOn === 'sample' && sampleOff.shown === 'imported' && sampleOff.lit === 'false', `the lit letter did not turn the sample off: ${sampleOn} -> ${JSON.stringify(sampleOff)}`);
+
+  // Toon: the cel material, and one ink outline per mesh that goes with the mode.
+  const toon = await frame.evaluate(() => {
+    const select = document.getElementById('mode');
+    const pick = v => { select.value = v; select.dispatchEvent(new Event('change', { bubbles: true })); };
+    pick('toon');
+    const on = { types: window.mobiusDebug.materials().map(m => m.type), outlines: window.mobiusDebug.outlines };
+    pick('material');
+    return { ...on, after: window.mobiusDebug.outlines };
+  });
+  note(toon.types.length && toon.types.every(t => t === 'MeshToonMaterial') && toon.outlines === toon.types.length && toon.after === 0,
+       `toon: ${JSON.stringify(toon)}`);
+
+  // The orientation gizmo: under the title at its width, naming the side,
+  // framing from an axis when pressed, and folding to an icon it remembers.
+  const gizmoBox = await frame.evaluate(() => {
+    const g = document.getElementById('gizmo').getBoundingClientRect(), t = document.querySelector('header h1').getBoundingClientRect();
+    return { left: Math.round(g.left - t.left), width: Math.round(g.width - t.width), below: g.top > t.bottom, side: window.mobiusDebug.gizmo.side };
+  });
+  note(gizmoBox.left === 0 && gizmoBox.width === 0 && gizmoBox.below, `the gizmo is not under the title at its width: ${JSON.stringify(gizmoBox)}`);
+  const views = {};
+  for (const [label, side] of [['(-Z)', 'Back'], ['(+X)', 'Right'], ['(+Z)', 'Front']]) {
+    await frame.click(`#gizmo [aria-label$="${label}"]`, { force: true });
+    await frame.waitForTimeout(400);
+    views[label] = await frame.evaluate(() => window.mobiusDebug.gizmo.side);
+    note(views[label] === side, `the gizmo's ${label} framed "${views[label]}", not ${side}`);
+  }
+  await frame.click('#gizmo .gizmo-fold');
+  const folded = await frame.evaluate(() => ({ folded: window.mobiusDebug.gizmo.folded, svg: getComputedStyle(document.querySelector('#gizmo > svg')).display, saved: localStorage.getItem('mobius-gizmo') }));
+  await frame.click('#gizmo .gizmo-open');
+  const unfolded = await frame.evaluate(() => window.mobiusDebug.gizmo.folded);
+  note(folded.folded && folded.svg === 'none' && folded.saved === 'folded' && !unfolded, `the gizmo did not fold and unfold: ${JSON.stringify(folded)} / ${unfolded}`);
+  console.log(`gizmo: ${JSON.stringify(gizmoBox)}, views ${JSON.stringify(views)}; toon ${JSON.stringify(toon)}`);
+
   // ---- 4. compressed glTF: the decoders, under the site's CSP --------------
   for (const [name, ext] of [['knot-draco.glb', 'KHR_draco_mesh_compression'], ['knot-meshopt.glb', 'EXT_meshopt_compression']]) {
     const bytes = await readFile(join(FIX, name));
@@ -302,7 +371,7 @@ try {
       const b = document.getElementById('mode-button').getBoundingClientRect(), l = document.getElementById('mode-list').getBoundingClientRect();
       return { shown: !document.getElementById('mode-list').hidden, same: Math.abs(b.width - l.width) < 1, items: [...document.querySelectorAll('#mode-list li')].map(li => li.textContent) };
     });
-    note(dd.shown && dd.same && dd.items.join() === 'Normals,Grayscale,Vertex colors,Unlit,Material', `the shading list: ${JSON.stringify(dd)}`);
+    note(dd.shown && dd.same && dd.items.join() === 'Normals,Grayscale,Vertex colors,Unlit,Toon,Material', `the shading list: ${JSON.stringify(dd)}`);
     await frame.click('#mode-list li:text-is("Grayscale")');
     const m2 = await materials();
     note(m2[0]?.type === 'MeshStandardMaterial' && m2[0].wireframe && (await frame.evaluate(() => document.getElementById('mode').value)) === 'clay',
