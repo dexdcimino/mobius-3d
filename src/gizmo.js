@@ -30,9 +30,11 @@ export function initGizmo({ camera, title, onView }) {
     <div class="gizmo-side" aria-live="polite"></div>`;
   const svg = el('svg', { viewBox: '-50 -50 100 100', role: 'img', 'aria-label': 'Orientation: X right, Y up, Z front' });
   root.insertBefore(svg, root.querySelector('.gizmo-side'));
-  // The folded icon: the same three axes, small and fixed.
+  // The folded icon: the same three axes in miniature, turning with the camera
+  // like the open gizmo does (update() moves them while folded).
   root.querySelector('.gizmo-open').insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M10 14 L20 14" stroke="#ff5c6c"/><path d="M10 14 L10 4" stroke="#7ee36b"/><path d="M10 14 L4 20" stroke="#5ea2ff"/></svg>`);
+    <path d="M12 12 L21 12" stroke="#ff5c6c"/><path d="M12 12 L12 3" stroke="#7ee36b"/><path d="M12 12 L6 18" stroke="#5ea2ff"/></svg>`);
+  const mini = root.querySelector('.gizmo-open svg'), miniAxes = [...mini.querySelectorAll('path')].map((path, i) => ({ path, dir: AXES[i].dir }));
   svg.append(el('circle', { r: 47, class: 'gizmo-disc' }));
   const items = [];
   for (const axis of AXES) for (const sign of [1, -1]) {
@@ -78,6 +80,14 @@ export function initGizmo({ camera, title, onView }) {
   let side = '';
   function update() {
     inverse.copy(camera.quaternion).invert();
+    if (folded) {
+      for (const a of miniAxes) {
+        v.copy(a.dir).applyQuaternion(inverse);
+        a.path.setAttribute('d', `M12 12 L${(12 + v.x * 9).toFixed(2)} ${(12 - v.y * 9).toFixed(2)}`);
+        a.depth = v.z; a.path.style.opacity = (.55 + .45 * (v.z + 1) / 2).toFixed(3);
+      }
+      for (const a of [...miniAxes].sort((p, q) => p.depth - q.depth)) mini.append(a.path);
+    }
     for (const item of items) {
       v.copy(item.dir).applyQuaternion(inverse);       // into camera space: x right, y up, z towards you
       const x = v.x * 34, y = -v.y * 34;

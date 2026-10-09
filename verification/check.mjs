@@ -225,10 +225,11 @@ try {
   note(tip.text === 'Hide gizmo' && tip.opacity === '1' && tip.radius === '8px' && tip.right && tip.centred, `the hide button's tip did not show on hover: ${JSON.stringify(tip)}`);
   await page.mouse.move(0, 0);
   await frame.click('#gizmo .gizmo-fold');
-  const folded = await frame.evaluate(() => ({ folded: window.mobiusDebug.gizmo.folded, svg: getComputedStyle(document.querySelector('#gizmo > svg')).display, saved: localStorage.getItem('mobius-gizmo') }));
+  await frame.waitForTimeout(100);
+  const folded = await frame.evaluate(() => ({ folded: window.mobiusDebug.gizmo.folded, mini: [...document.querySelectorAll('#gizmo .gizmo-open path')].map(p => p.getAttribute('d')), svg: getComputedStyle(document.querySelector('#gizmo > svg')).display, saved: localStorage.getItem('mobius-gizmo') }));
   await frame.click('#gizmo .gizmo-open');
   const unfolded = await frame.evaluate(() => window.mobiusDebug.gizmo.folded);
-  note(folded.folded && folded.svg === 'none' && folded.saved === 'folded' && !unfolded, `the gizmo did not fold and unfold: ${JSON.stringify(folded)} / ${unfolded}`);
+  note(folded.folded && folded.mini.length === 3 && !folded.mini.includes('M12 12 L21 12') && folded.svg === 'none' && folded.saved === 'folded' && !unfolded, `the gizmo did not fold and unfold: ${JSON.stringify(folded)} / ${unfolded}`);
   console.log(`gizmo: ${JSON.stringify(gizmoBox)}, fold ${JSON.stringify(fold)}, tip ${JSON.stringify(tip)}, views ${JSON.stringify(views)}; toon ${JSON.stringify(toon)}`);
 
   // ---- 4. compressed glTF: the decoders, under the site's CSP --------------
@@ -404,7 +405,7 @@ try {
     // The panel is FOUR sections now (Dex): Textures folds inside Surface,
     // blend shapes and the info share Model, and the sample picks are a row of
     // View. Its scrollbar has a gutter kept for it, so opening every section
-    // moves nothing sideways; and each divider runs from the accent.
+    // moves nothing sideways; and each section is a capsule outlined round its controls.
     const panel = await frame.evaluate(() => {
       const p = document.querySelector('.panel-controls'), sum = document.querySelector('.panel-controls > details > summary');
       const before = [p.clientWidth, sum.getBoundingClientRect().right];
@@ -412,10 +413,10 @@ try {
       const after = [p.clientWidth, sum.getBoundingClientRect().right, p.scrollHeight > p.clientHeight];
       for (const d of p.querySelectorAll(':scope > details')) d.open = d.querySelector('summary').textContent !== 'Lighting';
       return { sections: [...p.querySelectorAll(':scope > details > summary')].map(s => s.textContent).join(), before, after,
-        divider: getComputedStyle(p.querySelector(':scope > details')).backgroundImage, sample: !document.getElementById('sample-section').hidden };
+        capsule: [...p.querySelectorAll(':scope > details:not([hidden])')].map(d => { const c = getComputedStyle(d); return c.borderTopWidth + ' ' + c.borderRadius; }), sample: !document.getElementById('sample-section').hidden };
     });
     note(panel.sections === 'Surface,Model,Lighting,View' && panel.after[2] && panel.before[0] === panel.after[0] && panel.before[1] === panel.after[1]
-         && /^linear-gradient\(90deg, rgb/.test(panel.divider) && panel.sample, `the panel: ${JSON.stringify(panel)}`);
+         && panel.capsule.length >= 3 && panel.capsule.every(c => c === '1px 22px') && panel.sample, `the panel: ${JSON.stringify(panel)}`);
     const shapes = [];
     for (const k of ['mobius', 'shell', 'klein', 'knot']) {
       await frame.click(`[data-sample="${k}"]`);
