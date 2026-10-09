@@ -33,6 +33,9 @@ const args = process.argv.slice(2);
 const flag = (name, fallback) => { const i = args.indexOf(name); return i < 0 ? fallback : args.splice(i, 2)[1]; };
 const AUDIO = flag('--audio'), AUDIO_FROM = Number(flag('--audio-from', 0)), SECONDS = Number(flag('--seconds', 60));
 const POSTER = flag('--poster');
+// --dry walks the whole script on the clock without a frame captured: a control
+// that is covered or off screen fails in seconds rather than half an hour in.
+const DRY = args.includes('--dry') && args.splice(args.indexOf('--dry'), 1);
 const OUT = resolve(args[0] || 'mobius.mp4');
 // 4:3: the featured frame on a desktop runs about 1.15 to 1.4 wide, so this
 // fills it with the least letterbox; the one-column 16:10 frame pillarboxes
@@ -67,13 +70,13 @@ await page.clock.pauseAt(Date.now() + 1000);
 const total = SECONDS * FPS;
 const fade = Math.round(FPS * 1.5);
 const filters = `scale=${OUT_W}:${OUT_H}:flags=lanczos,fade=t=in:st=0:d=0.5,fade=t=out:st=${(total - fade) / FPS}:d=${fade / FPS},format=yuv420p`;
-const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
+const ff = DRY ? null : spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
   ...(AUDIO ? ['-ss', String(AUDIO_FROM), '-i', AUDIO] : []), '-vf', filters, '-c:v', 'libx264', '-preset', 'slow', '-crf', '24', '-profile:v', 'high',
   '-g', String(FPS * 2), '-movflags', '+faststart',
   ...(AUDIO ? ['-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '160k',
     '-af', `afade=t=in:st=0:d=0.3,afade=t=out:st=${(total - fade * 1.6) / FPS}:d=${fade * 1.6 / FPS}`, '-t', String(SECONDS)] : ['-an']), OUT],
   { stdio: ['pipe', 'inherit', 'inherit'] });
-const ffDone = new Promise((ok, fail) => ff.on('close', code => code ? fail(new Error(`ffmpeg exited ${code}`)) : ok()));
+const ffDone = DRY ? Promise.resolve() : new Promise((ok, fail) => ff.on('close', code => code ? fail(new Error(`ffmpeg exited ${code}`)) : ok()));
 
 // The cursor: an arrow, drawn over everything, that the script moves and the
 // real mouse follows so hovers and presses land where it points.
@@ -85,19 +88,33 @@ await page.evaluate(() => {
   const ring = c.querySelector('i');
   ring.style.cssText = 'position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;border:2px solid #fff;opacity:0;';
   document.body.appendChild(c);
+  // The caption: what the cursor is doing, in a line under the title.
+  const h1 = document.querySelector('header h1').getBoundingClientRect(), cap = document.createElement('div');
+  cap.id = 'rec-caption';
+  cap.style.cssText = `position:fixed;left:${h1.left}px;top:${h1.bottom + 10}px;z-index:2147483646;pointer-events:none;font:500 15px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;color:rgba(236,242,248,.9);letter-spacing:.01em;opacity:0;display:flex;align-items:center;gap:9px`;
+  cap.innerHTML = '<i style="width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none"></i><span></span>';
+  document.body.appendChild(cap);
 });
 
 let frame = 0, x = W * .62, y = H * 1.2, press = 0;
+// A caption change fades the old line out over 6 frames, then the new one in over 9.
+let capShown = '', capWant = '', capAt = 0, capOpacity = 0;
+const caption = text => { capWant = text; capAt = frame; };
 async function shot() {
   if (frame >= total) return;
-  await page.evaluate(([x, y, p]) => {
+  if (capWant !== capShown) { capOpacity = Math.max(0, capOpacity - 1 / 6); if (!capOpacity) { capShown = capWant; capAt = frame; } }
+  else if (capShown) capOpacity = Math.min(1, capOpacity + 1 / 9);
+  await page.evaluate(([x, y, p, text, o]) => {
+    const cap = document.getElementById('rec-caption');
+    cap.lastChild.textContent = text; cap.style.opacity = String(o);
     const c = document.getElementById('rec-cursor');
     c.style.transform = `translate(${x - 3}px, ${y - 2}px)`;
     const ring = c.lastChild;
     ring.style.opacity = p > 0 ? String(p) : '0';
     ring.style.transform = `scale(${1.6 - p * .6})`;
-  }, [x, y, press]);
+  }, [x, y, press, capShown, capOpacity]);
   await page.clock.runFor(1000 / FPS);
+  if (DRY) { frame++; press = Math.max(0, press - .06); return; }
   // The clip's scale is what makes it device pixels: without it CDP hands
   // back CSS pixels and the encode is an upscale.
   const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 94, clip: { x: 0, y: 0, width: W, height: H, scale: SCALE } });
@@ -177,41 +194,86 @@ async function scrollPanelAt(t, selector, s = BAR) {
   }
 }
 
-try {
-  // Two bars on the opening shot: violet, straight on, close, playing Wave.
-  // The cursor drifts in over the model.
-  await until(bar(.5));
-  await moveTo(W * .30, H * .46, BAR * 1.5);
-  // Bar 2: one slow drag turns it three-quarters and eases the camera back.
-  await orbitAt(bar(2), W * .06, H * .05, BAR * 2, 1.15);
-  // Bar 4: Pulse.
-  await chooseAt(bar(5), 'anim-clip', 'Pulse');
-  // Bar 7: the first accent change, to blue.
-  await clickAt(bar(7), '.accent-swatch[data-accent="Blue"]');
-  // Bar 8: Bulge held on its slider while Pulse plays on, over a bar and a half.
-  const [, sy, slider] = await centre('#shape-weight');
-  await until(bar(8.5) - BAR * .9);
-  await moveTo(slider.x + slider.width * .2, sy, BAR * .9);
+
+// Drags a range input's thumb from where it is to `to` (0..1 along it).
+async function slideAt(t, selector, to, s = BAR * .6) {
+  const [, cy, box] = await centre(selector);
+  const at = await page.evaluate(sel => { const r = document.querySelector(sel); return (r.value - r.min) / (r.max - r.min); }, selector);
+  const px = f => box.x + 8 + f * (box.width - 16);
+  await until(t - .9);
+  await moveTo(px(at), cy, .8);
+  await until(t);
   await page.mouse.down(); press = 1;
-  await moveTo(slider.x + slider.width * .78, sy, BAR * 1.5);
+  await moveTo(px(to), cy, s);
   await page.mouse.up();
-  // Bar 10: the panel scrolls down to View, and auto orbit goes on.
-  await scrollPanelAt(bar(10.25), '.sample-row', BAR * .75);
-  await clickAt(bar(11.5), '#spin');
+}
+// Pans by a middle drag, the way the viewer now takes it.
+async function panAt(t, dx, dy, s) {
+  await until(t);
+  const sx = x, sy = y, n = Math.round(s * FPS);
+  await page.mouse.down({ button: 'middle' });
+  for (let i = 1; i <= n; i++) { const p = ease(i / n); x = sx + dx * p; y = sy + dy * p; await page.mouse.move(x, y); await shot(); }
+  await page.mouse.up({ button: 'middle' });
+}
+const QUICK = BAR * .45;
+
+try {
+  // v4 (Dex): quicker hands, still eased, and more of the app: shading modes,
+  // exposure and light direction, a second sample with its own animations, and
+  // a caption under the title naming each thing as it happens.
+  caption('Trefoil Knot, playing its Wave animation');
+  await until(1.0);
+  await moveTo(W * .32, H * .46, .9);
+  caption('Drag to orbit');
+  await orbitAt(2.0, W * .12, H * .04, 1.6, 1.12);
+  caption('Middle drag to pan');
+  await until(4.0);
+  await panAt(4.3, W * .07, H * .03, .9);
+  await panAt(5.5, -W * .07, -H * .03, .9);
+  caption('Switch the shading');
+  await clickAt(7.3, 'summary:text-is("Surface")', QUICK);
+  await chooseAt(8.3, 'mode', 'Normals');
+  caption('Normals: the surface direction as colour');
+  await chooseAt(10.6, 'mode', 'Unlit');
+  caption('Unlit: the colour alone, no light');
+  await chooseAt(12.9, 'mode', 'Material');
+  caption('Back to the full material');
+  await clickAt(15.2, 'summary:text-is("Surface")', QUICK);
+  caption('Turn up the exposure');
+  await clickAt(16.3, 'summary:text-is("Lighting")', QUICK);
+  await slideAt(17.4, '#exposure', .78, 1.3);
+  caption('Swing the light round');
+  await slideAt(19.9, '#rotateLight', .88, 1.2);
+  await moveTo(x, y, .3);
+  await slideAt(21.6, '#rotateLight', .5, 1.2);
+  caption('Pick an accent colour');
+  await clickAt(23.6, '.accent-swatch[data-accent="Blue"]', QUICK);
+  caption('Try another sample');
+  await scrollPanelAt(25.0, '.sample-row', .8);
+  await clickAt(26.6, '[data-sample="mobius"]', QUICK);
+  caption('Mobius Band, its ribbon rolling as a wave');
   // THE DROP: the second accent change, to orange.
-  await clickAt(DROP, '.accent-swatch[data-accent="Orange"]', BAR);
-  // Wave back, then the grid off and on again.
-  await chooseAt(bar(14.5), 'anim-clip', 'Wave');
-  await clickAt(bar(16), '#grid');
-  await clickAt(bar(17.5), '#grid');
-  // The third accent change, to green.
-  await clickAt(bar(19), '.accent-swatch[data-accent="Green"]');
-  // The rest: the cursor leaves and the knot turns on its own.
-  await until(bar(20));
-  await moveTo(W * .5, H * 1.15, BAR * 1.5);
+  await clickAt(DROP, '.accent-swatch[data-accent="Orange"]', QUICK);
+  caption('Orbit and zoom');
+  await moveTo(W * .34, H * .5, .9);
+  await orbitAt(33.0, -W * .1, H * .05, 1.8, .82);
+  caption('Flutter, its second animation');
+  await chooseAt(36.0, 'anim-clip', 'Flutter');
+  caption('Auto orbit');
+  await clickAt(39.6, '#spin', QUICK);
+  caption('The floor grid, off and on');
+  await clickAt(42.4, '#grid', QUICK);
+  await clickAt(44.2, '#grid', QUICK);
+  caption('Pick an accent colour');
+  await clickAt(46.6, '.accent-swatch[data-accent="Green"]', QUICK);
+  caption('Back to Roll');
+  await chooseAt(48.6, 'anim-clip', 'Roll');
+  await until(51.5);
+  caption('Mobius 3D: free on Windows, macOS, Linux and the web');
+  await moveTo(W * .5, H * 1.15, 1.2);
   while (frame < total) await shot();
 } finally {
-  ff.stdin.end();
+  ff?.stdin.end();
   await ffDone.catch(error => { console.error(error.message); process.exitCode = 1; });
   await browser.close();
   served.close();
