@@ -7,7 +7,7 @@ import * as THREE from 'three';
    three's, and what Blender calls front once its Z-up is turned Y-up. The line
    under the axes names the side you are looking at. A positive axis is a
    filled, lettered ball; its negative a hollow ring; pressing either frames
-   the model from that side. The corner button folds it into a small icon,
+   the model from that side. The top-left corner button folds it into a small icon,
    and the choice is remembered. */
 const AXES = [
   { key: 'x', color: '#ff5c6c', dir: new THREE.Vector3(1, 0, 0) },
@@ -23,14 +23,16 @@ const el = (name, attrs = {}) => { const e = document.createElementNS(NS, name);
 export function initGizmo({ camera, title, onView }) {
   const root = document.createElement('div');
   root.id = 'gizmo';
-  root.innerHTML = `<button type="button" class="gizmo-fold" aria-label="Hide the orientation gizmo" title="Hide the orientation gizmo">–</button>
-    <button type="button" class="gizmo-open" aria-label="Show the orientation gizmo" title="Orientation"></button>
+  // The corner buttons wear the site's dark tip (.gizmo-tip, shown on hover
+  // and keyboard focus), not a native title, which draws the OS's own box.
+  root.innerHTML = `<button type="button" class="gizmo-fold" aria-label="Hide gizmo">–<span class="gizmo-tip" aria-hidden="true">Hide gizmo</span></button>
+    <button type="button" class="gizmo-open" aria-label="Show gizmo"><span class="gizmo-tip" aria-hidden="true">Show gizmo</span></button>
     <div class="gizmo-side" aria-live="polite"></div>`;
   const svg = el('svg', { viewBox: '-50 -50 100 100', role: 'img', 'aria-label': 'Orientation: X right, Y up, Z front' });
   root.insertBefore(svg, root.querySelector('.gizmo-side'));
   // The folded icon: the same three axes, small and fixed.
-  root.querySelector('.gizmo-open').innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M10 14 L20 14" stroke="#ff5c6c"/><path d="M10 14 L10 4" stroke="#7ee36b"/><path d="M10 14 L4 20" stroke="#5ea2ff"/></svg>`;
+  root.querySelector('.gizmo-open').insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M10 14 L20 14" stroke="#ff5c6c"/><path d="M10 14 L10 4" stroke="#7ee36b"/><path d="M10 14 L4 20" stroke="#5ea2ff"/></svg>`);
   svg.append(el('circle', { r: 47, class: 'gizmo-disc' }));
   const items = [];
   for (const axis of AXES) for (const sign of [1, -1]) {
