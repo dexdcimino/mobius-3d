@@ -1,2 +1,2 @@
-- The orientation gizmo's hide button moved to its top left corner and is now called "Hide gizmo"
-- Its tip is the app's own dark, rounded tip instead of the system's plain box
+- Each panel section (Surface, Model, Lighting, View) is now its own capsule: a pill when folded, an outlined box round its controls when open, so you can always see where one section ends and the next begins
+- The folded gizmo icon now turns with the camera, a miniature of the full gizmo
