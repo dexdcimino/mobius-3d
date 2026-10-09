@@ -438,6 +438,25 @@ try {
     note(!(await frame.evaluate(() => window.mobiusDebug.playing)), 'Space did not pause the animation');
     await page.keyboard.press('Space');
     note(await frame.evaluate(() => window.mobiusDebug.playing), 'Space did not start the animation');
+    // B, the band: Roll and Flutter, nine shapes, and framed off its real
+    // reach -- Three's box counts every shape at full weight, which sized it 11 m.
+    await frame.click('[data-sample=mobius]');
+    await frame.waitForFunction(() => /Mobius Band/.test(document.getElementById('filename').textContent));
+    const band = await state();
+    const bandSize = await frame.evaluate(() => document.querySelector('[data-info=size]')?.textContent || '');
+    const reach = Math.max(...(bandSize.match(/[\d.]+/g) || [99]).map(Number));
+    note(band.clips.join() === 'Roll,Flutter' && band.shapes?.length === 9 && band.playing && reach < 5,
+         `the Mobius Band's motion: ${JSON.stringify({ clips: band.clips, shapes: band.shapes?.length, playing: band.playing, size: bandSize })}`);
+    // A middle drag pans, as a right drag does: the orbit target moves.
+    const vp = await frame.evaluate(() => { const r = document.getElementById('viewport').getBoundingClientRect(); return [r.left + r.width * .4, r.top + r.height * .5]; });
+    const before = await frame.evaluate(() => window.mobiusDebug.target);
+    await page.mouse.move(vp[0], vp[1]); await page.mouse.down({ button: 'middle' });
+    for (let i = 1; i <= 8; i++) await page.mouse.move(vp[0] + i * 12, vp[1] + i * 6);
+    await page.mouse.up({ button: 'middle' });
+    const after = await frame.evaluate(() => window.mobiusDebug.target);
+    note(before.some((v, i) => Math.abs(v - after[i]) > .01), `a middle drag did not pan: ${before} -> ${after}`);
+    console.log(`band: ${band.clips.join('/')} with ${band.shapes?.length} shapes, size ${bandSize}; middle drag ${before} -> ${after}`);
+    await frame.click('[data-sample=knot]');
     // An imported glTF with two clips and a blend shape; a still one hides it all.
     await open('animated.glb');
     const g = await state();

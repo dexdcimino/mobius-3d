@@ -47,6 +47,9 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+// Middle drag pans, as the right drag does: the way Blender and most DCC tools
+// move the view. Three's default makes it a second zoom; the wheel already is one.
+controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
 // Three's default of 2 (one turn in 30 s) read as rushed; 30% slower.
 controls.autoRotateSpeed = 1.4;
 const studio = initStudio(renderer);
@@ -712,6 +715,7 @@ window.viewerReady = true;
    and a way to make the GPU drop the context, which nothing else can force. */
 window.mobiusDebug = {
   get frames() { return framesDrawn; },
+  get target() { return controls.target.toArray().map(n => +n.toFixed(3)); },
   // The exact counts, in words, for checks that need more than the header's "768K tris".
   get statsText() {
     if (!shown) return '';
