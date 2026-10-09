@@ -3,7 +3,8 @@
 A local 3D model viewer that runs in two places from **one codebase**:
 
 - **Desktop** (Windows, Linux, macOS): drag a model in, or right-click a file
-  and **Open with → Mobius 3D**. Updates itself from this repo's Releases.
+  and **Open with → Mobius 3D**. When a new Release is out it asks first: an
+  **Update?** prompt, bottom left, with the release notes behind its info icon.
 - **The web**: the same viewer, served as a functional preview on
   [dexcimino.com](https://dexcimino.com) (AI Lab → Mobius 3D → the eye).
 
@@ -39,7 +40,7 @@ packages that folder; the website serves a copy of it. Edit `src/`, and:
 | to update | run | then |
 |---|---|---|
 | the website | `npm run site` | commit the portfolio's `mobius/` folder |
-| the desktop app | bump `version` and merge to main (or push a `vX.Y.Z` tag) | CI builds all three platforms and publishes a Release; installed apps update on next launch |
+| the desktop app | write `build/release-notes.md`, bump `version` and merge to main (or push a `vX.Y.Z` tag) | CI builds all three platforms and publishes a Release with those notes; installed apps show **Update?** with the notes behind its info icon |
 
 ## Heavy models
 

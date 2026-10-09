@@ -519,6 +519,71 @@ try {
     await blocked.close();
   }
 
+  // ---- 12b. the desktop's "Update?" prompt (Dex, 2026-10-09) ---------------
+  // The bridge is a stand-in: the page cannot tell, and main.cjs is the only
+  // thing that talks to GitHub. FALSELY PASSES IF the prompt is never offered,
+  // so every assertion after the first needs it on screen.
+  {
+    const bridge = () => {
+      window.__sent = [];
+      window.mobiusDesktop = {
+        open: async () => {}, ready: () => {}, onFiles: () => {},
+        onUpdate: cb => { window.__offer = cb; },
+        update: () => window.__sent.push('yes'), updatePage: () => window.__sent.push('page'),
+      };
+    };
+    const up = await context.newPage();
+    await up.addInitScript(bridge);
+    await up.goto(`${ORIGIN}/mobius/?sample=knot`);
+    await up.waitForFunction(() => window.viewerReady === true && typeof window.__offer === 'function', null, { timeout: 30000 }).catch(() => {});
+    const quiet = await up.evaluate(() => document.getElementById('update').hidden);
+    note(quiet, 'the update prompt showed before any update was offered');
+    await up.evaluate(() => window.__offer({ state: 'available', version: '9.9.9', notes: ['Updates ask first', 'A faster open'] }));
+    const box = await up.evaluate(() => {
+      const u = document.getElementById('update'), r = u.getBoundingClientRect(), t = document.getElementById('update-notes');
+      const tl = document.getElementById('timeline'), tr = tl.hidden ? null : tl.getBoundingClientRect();
+      return { shown: !u.hidden, left: Math.round(r.left), bottom: Math.round(innerHeight - r.bottom), clear: tr ? r.bottom <= tr.top : true, timeline: !!tr, text: document.getElementById('update-text').textContent,
+        order: [...u.children].map(c => c.id), tip: getComputedStyle(t).opacity };
+    });
+    note(box.shown && box.left === 24 && box.bottom === (box.timeline ? 92 : 24) && box.clear && box.text === 'Update?' && box.tip === '0' &&
+         box.order.slice(0, 4).join() === 'update-info,update-text,update-yes,update-no',
+         `the prompt: ${JSON.stringify(box)}`);
+    const ib = await up.locator('#update-info').boundingBox();
+    await up.mouse.move(ib.x + ib.width / 2, ib.y + ib.height / 2); await up.waitForTimeout(300);
+    const tip = await up.evaluate(() => {
+      const t = document.getElementById('update-notes');
+      t.getAnimations().forEach(a => a.finish());   // headless stalls the fade; its end state is the claim
+      const r = t.getBoundingClientRect(), u = document.getElementById('update').getBoundingClientRect();
+      const hit = document.elementFromPoint(u.left + 27, u.top + u.height / 2);
+      return { op: getComputedStyle(t).opacity, above: r.bottom <= u.top, text: t.innerText, hit: hit && (hit.closest('button')?.id || hit.id || hit.tagName) };
+    });
+    note(tip.op === '1' && tip.above && /9\.9\.9/.test(tip.text) && /Updates ask first/.test(tip.text) && /A faster open/.test(tip.text),
+         `the info tip: ${JSON.stringify(tip)}`);
+    await up.click('#update-yes');
+    await up.evaluate(() => window.__offer({ state: 'downloading', percent: 42 }));
+    const going = await up.evaluate(() => ({ sent: window.__sent.join(), text: document.getElementById('update-text').textContent, yes: document.getElementById('update-yes').hidden }));
+    note(going.sent === 'yes' && going.text === 'Updating… 42%' && going.yes, `Yes: ${JSON.stringify(going)}`);
+    await up.evaluate(() => window.__offer({ state: 'failed' }));
+    await up.click('#update-yes');
+    const page = await up.evaluate(() => ({ sent: window.__sent.join(), hidden: document.getElementById('update').hidden }));
+    note(page.sent === 'yes,page' && page.hidden, `a failed install offers the release page: ${JSON.stringify(page)}`);
+    // No: hidden, and not offered again for that version -- only a newer one.
+    await up.reload();
+    await up.waitForFunction(() => typeof window.__offer === 'function', null, { timeout: 30000 }).catch(() => {});
+    await up.evaluate(() => window.__offer({ state: 'available', version: '9.9.9', notes: [] }));
+    await up.click('#update-no');
+    await up.reload();
+    await up.waitForFunction(() => typeof window.__offer === 'function', null, { timeout: 30000 }).catch(() => {});
+    await up.evaluate(() => window.__offer({ state: 'available', version: '9.9.9', notes: [] }));
+    const refused = await up.evaluate(() => document.getElementById('update').hidden);
+    await up.evaluate(() => window.__offer({ state: 'available', version: '9.9.10', notes: [] }));
+    const newer = await up.evaluate(() => ({ hidden: document.getElementById('update').hidden, tip: document.getElementById('update-notes').textContent }));
+    note(refused && !newer.hidden && /Fixes and improvements/.test(newer.tip), `No: the same version stays hidden (${refused}), a newer one asks (${JSON.stringify(newer)})`);
+    await up.close();
+    // The website has no bridge, so it never shows.
+    note(await frame.evaluate(() => document.getElementById('update').hidden && !window.mobiusDesktop), 'the website showed the update prompt');
+  }
+
   // ---- 13. nothing left the origin, and nothing went wrong quietly ----------
   const foreign = requests.filter(p => !p.startsWith('/mobius/') && p !== '/host.html');
   note(foreign.length === 0, `requests outside /mobius/: ${foreign.join(', ')}`);

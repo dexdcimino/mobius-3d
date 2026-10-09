@@ -24,6 +24,7 @@ import { dropdown } from './dropdown.js';
 import { initMotion, clipsOf, shapesOf } from './motion.js';
 import { initStudio, initContactShadow } from './studio.js';
 import { initSwatchMark } from './swatchmark.js';
+import { initUpdate } from './update.js';
 
 const $ = id => document.getElementById(id);
 document.title = `${brand.name} • Model Viewer`;
@@ -741,6 +742,7 @@ window.mobiusDebug = {
     overGrid: !floor.children[0].material.depthTest && floor.children[0].renderOrder > grid.renderOrder }),
 };
 if (window.mobiusDesktop) {
+  initUpdate(window.mobiusDesktop);
   let incoming = Promise.resolve();
   window.mobiusDesktop.onFiles(payload => {
     incoming = incoming.then(async () => {

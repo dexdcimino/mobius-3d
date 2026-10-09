@@ -1,7 +1,7 @@
 // The desktop app: the SAME dist/ the website serves, in its own window, with
 // a narrow bridge for the one thing a web page cannot do -- be handed a file by
 // the operating system ("Open with", a double-click, a drag onto the icon).
-const { app, BrowserWindow, ipcMain, dialog, protocol, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, session, shell } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const brand = require('./brand.json');
@@ -85,18 +85,59 @@ else {
     win.webContents.on('did-start-loading', () => { ready = false; });
     await win.loadURL(`${ORIGIN}/`);
 
-    /* UPDATES: the build pushed to GitHub Releases reaches this app on its own.
-       Only in a packaged build, never in a test run. A failure is silent on
-       purpose -- offline, or an unsigned macOS build that cannot self-update,
-       is still a working viewer, and a dialog about it would be noise.
-       A Microsoft Store install (process.windowsStore) is updated by the
-       Store, and must never replace itself with the GitHub installer. */
+    /* UPDATES ASK FIRST (Dex, 2026-10-09). The build pushed to GitHub Releases
+       is found here, but nothing downloads until the person says Yes on the
+       viewer's bottom-left "Update?" prompt; the release's own notes ride
+       along for its info tip. No hides it until a newer version (the viewer
+       remembers which). Yes downloads, then quits, installs and reopens. An
+       install that cannot replace itself (an unsigned macOS build, a .deb)
+       says so and offers the release page instead. A failed CHECK is silent
+       on purpose: offline is still a working viewer.
+       Only in a packaged build, never in a test run, and never in a Microsoft
+       Store install (process.windowsStore): the Store updates that one, and
+       it must never replace itself with the GitHub installer. */
     if (app.isPackaged && !process.windowsStore && !process.env.MOBIUS_TEST_PROFILE) {
-      try {
-        const { autoUpdater } = require('electron-updater');
-        autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-      } catch { /* updater missing from this build */ }
+      let autoUpdater;
+      try { ({ autoUpdater } = require('electron-updater')); } catch { /* updater missing from this build */ }
+      if (autoUpdater) startUpdates(autoUpdater, trusted);
     }
   });
   app.on('window-all-closed', () => app.quit());
+}
+
+const RELEASES = 'https://github.com/dexdcimino/mobius-3d/releases/latest';
+// GitHub hands the release body over as HTML; the tip wants a few plain lines.
+function noteLines(notes) {
+  const raw = Array.isArray(notes) ? notes.map(n => n.note || '').join('\n') : String(notes || '');
+  return raw.replace(/<\/(p|li|h\d|div)>|<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .split('\n').map(line => line.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean).slice(0, 8);
+}
+function startUpdates(autoUpdater, trusted) {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  let offered = null, installing = false;
+  const send = payload => { if (win && !win.isDestroyed()) win.webContents.send('viewer:update', payload); };
+  autoUpdater.on('update-available', info => {
+    offered = { state: 'available', version: info.version, notes: noteLines(info.releaseNotes) };
+    if (ready) send(offered);
+  });
+  autoUpdater.on('download-progress', p => send({ state: 'downloading', percent: Math.round(p.percent || 0) }));
+  autoUpdater.on('update-downloaded', () => {
+    send({ state: 'installing' });
+    setImmediate(() => autoUpdater.quitAndInstall(true, true));
+  });
+  autoUpdater.on('error', () => { if (installing) { installing = false; send({ state: 'failed' }); } });
+  // A reload of the viewer asks again, and gets what was already found.
+  ipcMain.on('viewer:update-ask', event => { if (trusted(event) && offered && !installing) event.sender.send('viewer:update', offered); });
+  ipcMain.on('viewer:update-yes', event => {
+    if (!trusted(event) || !offered || installing) return;
+    installing = true;
+    send({ state: 'downloading', percent: 0 });
+    autoUpdater.downloadUpdate().catch(() => { installing = false; send({ state: 'failed' }); });
+  });
+  ipcMain.on('viewer:update-page', event => { if (trusted(event)) shell.openExternal(RELEASES); });
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  check();
+  setInterval(check, 6 * 60 * 60 * 1000);   // a window left open for days still hears about it
 }
