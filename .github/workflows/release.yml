@@ -2,8 +2,8 @@
 # machines and publishes them to this repo's Releases -- which is also where
 # installed copies look for their updates.
 #
-#   write build/release-notes.md (a short list: it becomes the Release's text
-#   AND the installed app's update tip), bump "version" in package.json and
+#   write build/release-notes.md (a short plain list: it becomes the Release's
+#   text AND the installed app's update tip), bump "version" in package.json and
 #   merge it to main. That is the whole
 #   step: a push to main whose version has no v<version> tag yet releases it,
 #   and electron-builder creates the tag with the release. Pushing a tag by
