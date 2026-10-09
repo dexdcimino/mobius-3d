@@ -27,6 +27,10 @@ module.exports = {
   // The installers carry NO version in their names, so the website's download
   // button can link releases/latest/download/<name> and never go stale.
   publish: [{ provider: 'github', owner: 'dexdcimino', repo: 'mobius-3d', releaseType: 'release' }],
+  // The Release's text, which installed copies show behind the info icon on
+  // their "Update?" prompt. Named outright: the build/ default did not reach
+  // 0.6.0's Release, which went up with no notes at all.
+  releaseInfo: { releaseNotesFile: 'build/release-notes.md' },
 
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],

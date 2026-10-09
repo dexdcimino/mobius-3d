@@ -111,7 +111,7 @@ function noteLines(notes) {
   const raw = Array.isArray(notes) ? notes.map(n => n.note || '').join('\n') : String(notes || '');
   return raw.replace(/<\/(p|li|h\d|div)>|<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .split('\n').map(line => line.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean).slice(0, 8);
+    .split('\n').map(line => line.replace(/^\s*[-*•]\s*/, '').replace(/\*\*|__|`/g, '').trim()).filter(Boolean).slice(0, 8);
 }
 function startUpdates(autoUpdater, trusted) {
   autoUpdater.autoDownload = false;

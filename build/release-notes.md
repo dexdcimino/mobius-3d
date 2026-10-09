@@ -1,2 +1,2 @@
-- Updates now ask first: an **Update?** prompt in the bottom left when a new version is out
-- The info icon on that prompt lists what changed, like this
+- The release notes now show on the GitHub Releases page as well as here
+- Cleaner text in this tip
