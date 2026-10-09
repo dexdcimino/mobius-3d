@@ -43,6 +43,7 @@ function mobius() {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setIndex(indices);
+  geometry.userData.band = { segments, N, R, profile };
   return geometry;
 }
 
@@ -69,10 +70,10 @@ const klein = () => new ParametricGeometry((u, v, target) => {
 }, 180, 96);
 
 export const SAMPLES = {
-  knot:   { make: knot,   name: 'Trefoil knot', view: 'iso',  side: THREE.FrontSide },
-  mobius: { make: mobius, name: 'Mobius band',  view: 'iso',  side: THREE.FrontSide },
+  knot:   { make: knot,   name: 'Trefoil Knot', view: 'iso',  side: THREE.FrontSide },
+  mobius: { make: mobius, name: 'Mobius Band',  view: 'iso',  side: THREE.FrontSide },
   shell:  { make: shell,  name: 'Seashell',     view: 'iso',  side: THREE.DoubleSide },
-  klein:  { make: klein,  name: 'Klein bottle', view: 'front', side: THREE.DoubleSide },
+  klein:  { make: klein,  name: 'Klein Bottle', view: 'front', side: THREE.DoubleSide },
 };
 
 /* The colour is the ACCENT, as a two-stop gradient: lighter over the top,
@@ -191,6 +192,101 @@ function knotClips() {
   return [waveClip, pulseClip];
 }
 
+/* THE BAND MOVES TOO. ROLL turns each cross-section of the ribbon about the
+   band's own centre line, a full turn per loop, each section a little behind
+   the one before it: the roll starts at one point and runs the whole way round
+   the band as a wave, for ever. A section rolled by phi sits at
+   c + cos(phi) d + sin(phi) e, with d its offset from the centre line and e
+   that offset turned a quarter about the line. With phi = 2pi(u - t) that is
+   linear in cos(2pi t) and sin(2pi t), so like the knot's wave it is four
+   phase shapes a quarter-cycle apart plus one held at full weight (the -d that
+   takes the rest pose out) -- exact, not an approximation, at any frame.
+   FLUTTER bends the band's edges up and down as a wave travelling round it,
+   two and a half waves to the loop: a half-integer, because the half twist
+   turns the band's "up" over, so the wave has to change sign to meet itself. */
+function addBandShapes(geometry) {
+  const { segments, N, R, profile } = geometry.userData.band;
+  const position = geometry.attributes.position, normal = geometry.attributes.normal, n = position.count;
+  geometry.morphAttributes.position = []; geometry.morphAttributes.normal = [];
+  geometry.morphTargetsRelative = true;
+  const add = (name, delta, normalDelta) => {
+    const t = new THREE.BufferAttribute(delta, 3); t.name = name;
+    const tn = new THREE.BufferAttribute(normalDelta, 3); tn.name = name;
+    geometry.morphAttributes.position.push(t); geometry.morphAttributes.normal.push(tn);
+  };
+  // Per vertex: u round the band, d its offset from the centre line, and the
+  // same quarter-turn about the tangent for the offset (e) and the normal (m).
+  const d = new Float32Array(n * 3), e = new Float32Array(n * 3), m = new Float32Array(n * 3), U = new Float32Array(n), X = new Float32Array(n);
+  const up = new Float32Array(n * 3);
+  for (let i = 0; i < segments; i++) {
+    const u = i / segments * Math.PI * 2, tx = -Math.sin(u), tz = Math.cos(u), ct = Math.cos(u / 2), st = Math.sin(u / 2);
+    for (let k = 0; k < N; k++) {
+      const j = i * N + k, cx = R * Math.cos(u), cz = R * Math.sin(u);
+      const dx = position.getX(j) - cx, dy = position.getY(j), dz = position.getZ(j) - cz;
+      d.set([dx, dy, dz], j * 3);
+      // t x d, with t = (tx, 0, tz)
+      e.set([-tz * dy, tz * dx - tx * dz, tx * dy], j * 3);
+      const nx = normal.getX(j), ny = normal.getY(j), nz = normal.getZ(j);
+      m.set([-tz * ny, tz * nx - tx * nz, tx * ny], j * 3);
+      U[j] = i / segments; X[j] = profile[k][0];
+      // The band's local "up" across its width: (-sin(u/2)) in the radial direction, cos(u/2) in y.
+      up.set([-st * Math.cos(u), ct, -st * Math.sin(u)], j * 3);
+    }
+  }
+  const base = new Float32Array(n * 3), baseN = new Float32Array(n * 3);
+  for (let j = 0; j < n * 3; j++) { base[j] = -d[j]; baseN[j] = -normal.array[j]; }
+  add('Roll', base, baseN);
+  for (const [i, p] of PHASES.entries()) {
+    const delta = new Float32Array(n * 3), nd = new Float32Array(n * 3), q = p * Math.PI / 180;
+    for (let j = 0; j < n; j++) {
+      const a = U[j] * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      // cos(q) * (d cos a + e sin a) + sin(q) * (d sin a - e cos a)
+      const wd = Math.cos(q) * c + Math.sin(q) * s, we = Math.cos(q) * s - Math.sin(q) * c;
+      for (let x = 0; x < 3; x++) {
+        delta[j * 3 + x] = wd * d[j * 3 + x] + we * e[j * 3 + x];
+        nd[j * 3 + x] = wd * normal.array[j * 3 + x] + we * m[j * 3 + x];
+      }
+    }
+    add(`Roll ${'ABCD'[i]}`, delta, nd);
+  }
+  // Flutter: the edges bend along "up", by the square of how far across the band
+  // a point sits, so the centre line stays put and the two edges move together.
+  const scratch = new THREE.BufferGeometry();
+  scratch.setIndex(geometry.index);
+  for (const [i, p] of PHASES.entries()) {
+    const delta = new Float32Array(n * 3), moved = new Float32Array(n * 3), q = p * Math.PI / 180;
+    for (let j = 0; j < n; j++) {
+      const w = .32 * (X[j] / .6) ** 2 * Math.sin(U[j] * Math.PI * 2 * 2.5 - q);
+      for (let x = 0; x < 3; x++) { delta[j * 3 + x] = up[j * 3 + x] * w; moved[j * 3 + x] = position.array[j * 3 + x] + delta[j * 3 + x]; }
+    }
+    scratch.setAttribute('position', new THREE.BufferAttribute(moved, 3));
+    scratch.computeVertexNormals();
+    const shaded = scratch.attributes.normal.array, nd = new Float32Array(n * 3);
+    for (let j = 0; j < n * 3; j++) nd[j] = shaded[j] - normal.array[j];
+    add(`Flutter ${'ABCD'[i]}`, delta, nd);
+  }
+  scratch.dispose();
+}
+
+function bandClips(geometry) {
+  const names = geometry.morphAttributes.position.map(a => a.name);
+  const track = (name, times, values) => new THREE.NumberKeyframeTrack(`.morphTargetInfluences[${names.indexOf(name)}]`, times, values);
+  const steps = 96, roll = 6, flutter = 3, phase = (period, list) => {
+    const times = [], weights = PHASES.map(() => []);
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps * period, theta = s / steps * Math.PI * 2;
+      times.push(t);
+      PHASES.forEach((p, i) => weights[i].push(Math.max(0, Math.cos(theta - p * Math.PI / 180))));
+    }
+    return { times, weights };
+  };
+  const r = phase(roll), f = phase(flutter);
+  return [
+    new THREE.AnimationClip('Roll', roll, [track('Roll', [0, roll], [1, 1]), ...PHASES.map((p, i) => track(`Roll ${'ABCD'[i]}`, r.times, r.weights[i]))]),
+    new THREE.AnimationClip('Flutter', flutter, PHASES.map((p, i) => track(`Flutter ${'ABCD'[i]}`, f.times, f.weights[i]))),
+  ];
+}
+
 /* The material: a satin plastic, with highlights tight enough to show the
    form and a specular held under the default, so the studio's white walls do
    not wash a pale film over every grazing edge. */
@@ -201,11 +297,25 @@ export function makeSample(key, accentHex) {
   const geometry = spec.make();
   geometry.computeVertexNormals();
   if (key === 'knot') addKnotShapes(geometry);
+  if (key === 'mobius') {
+    // Three's box adds every blend shape at full weight on top of the rest, and
+    // ROLL's five together are four times the band's width: framed and sized off
+    // that, the band was a speck in the middle of the screen. Rolling only turns
+    // a section about its own centre and Flutter lifts an edge .32, so the true
+    // reach is the rest box grown by that, and the box is held there.
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox.clone().expandByScalar(.32 + .07);
+    addBandShapes(geometry);
+    geometry.computeBoundingBox = function () { this.boundingBox = box.clone(); };
+    geometry.computeBoundingSphere = function () { this.boundingSphere = box.getBoundingSphere(new THREE.Sphere()); };
+    geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+  }
   const mesh = new THREE.Mesh(geometry, sampleMaterial(spec.side));
   mesh.name = spec.name;
   // The knot opens lightly fluted: Ridges at 25% (80% read as too strong), a resting weight rather than
   // a held one, so Pulse, which keys Ridges, still moves it.
   if (key === 'knot') { mesh.updateMorphTargets(); mesh.animations = knotClips(); mesh.userData.restShapes = { Ridges: .25 }; }
+  if (key === 'mobius') { mesh.updateMorphTargets(); mesh.animations = bandClips(geometry); }
   paintSample(mesh, accentHex);
   return mesh;
 }
