@@ -1,2 +1,4 @@
-- Updates now ask first: an **Update?** prompt in the bottom left when a new version is out
-- The info icon on that prompt lists what changed, like this
+- Your own models look like themselves: vertex colours (ZBrush polypaint) are no longer darkened by the file's grey material, in every mode including Unlit
+- FBX, OBJ, DAE and 3DS materials are now lit by the studio like the samples, instead of only by four lights
+- Eyes, sockets and decals sitting a hair off a surface no longer flicker, at any zoom
+- Opening a model keeps the A-D sample row; clicking the lit letter turns the sample off

@@ -47,6 +47,22 @@ $('viewport').appendChild(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
 let framingAspect = 1;
 const controls = new OrbitControls(camera, renderer.domElement);
+/* THE DEPTH RANGE FOLLOWS THE CAMERA. It was fixed at each fit, near a
+   ten-thousandth of the model and far a thousand times it: ten million to
+   one, which leaves a 24-bit depth buffer centimetres of resolution across a
+   head. Sockets, eyes and decals modelled a hair off the surface under them
+   -- the way ZBrush inflates a subtool -- flickered through it, worse the
+   further out you zoomed. Now near is a fiftieth of the distance to what you
+   are orbiting and far just clears the grid: a ratio of a few hundred, at
+   every zoom. Everything is scaled to 3 units and the grid is 12 wide, so a
+   reach of 20 past the target always covers the scene. */
+const SCENE_REACH = 20;
+function fitDepth(view = camera) {
+  const distance = view.position.distanceTo(controls.target);
+  const near = Math.max(distance / 50, 1e-4), far = distance + SCENE_REACH;
+  if (view.near === near && view.far === far) return;
+  view.near = near; view.far = far; view.updateProjectionMatrix();
+}
 controls.enableDamping = true;
 // Middle drag pans, as the right drag does: the way Blender and most DCC tools
 // move the view. Three's default makes it a second zoom; the wheel already is one.
@@ -109,6 +125,7 @@ function requestRender() {
     const animating = !!motion?.tick(seconds);
     const moving = controls.update();
     contact.update(holder, animating);
+    fitDepth();
     renderer.render(scene, camera);
     framesDrawn++;
     if (moving || controls.autoRotate || animating) { lastFrame = now; requestRender(); } else lastFrame = 0;
@@ -141,8 +158,7 @@ function fit(view) {
   const direction = view ? new THREE.Vector3(...directions[view]) : camera.position.clone().sub(controls.target);
   if (direction.lengthSq() < 0.001) direction.set(1, .65, 1);
   controls.target.copy(center); camera.position.copy(center).add(direction.normalize().multiplyScalar(distance));
-  camera.near = Math.max(radius/10000, .00001); camera.far = radius * 1000;
-  camera.updateProjectionMatrix(); controls.minDistance = radius * .01; controls.maxDistance = radius * 100;
+  controls.minDistance = radius * .01; controls.maxDistance = radius * 100;
   controls.update();
   requestRender();
 }
@@ -276,7 +292,48 @@ function show(record, view = 'iso') {
   applyMode(); fit(view); requestRender();
 }
 
-function setModel(object, name) { imported = makeRecord(object, name); show(imported); }
+/* WHAT A FILE'S MATERIALS BECOME. FBX, OBJ, DAE and 3DS describe Phong and
+   Lambert surfaces, and those ignore the studio's environment entirely -- only
+   the four direct lights reached them, so an imported model sat in the dark
+   while the samples, which are PBR, were lit by the whole room. Each one is
+   made the PBR material it describes (roughness from its shininess), the way
+   Blender and every engine read these formats now.
+   And VERTEX COLOURS ARE THE COLOUR. A ZBrush export carries its polypaint as
+   vertex colours and writes a mid-grey diffuse (0.5, so 0.21 once linear) that
+   nothing about the model means; three multiplies the two, which made a
+   character a fifth as bright as it is in the game, in Unlit too. A grey base
+   colour on a vertex-coloured mesh with no colour map is dropped to white. A
+   HUED one is kept: that is somebody tinting on purpose. glTF is left exactly
+   as written: its spec says the factor multiplies, and its exporters mean it. */
+const LEGACY = new Set(['MeshPhongMaterial', 'MeshLambertMaterial']);
+const COPIED = ['name', 'color', 'map', 'normalMap', 'normalScale', 'bumpMap', 'bumpScale', 'emissive', 'emissiveMap', 'emissiveIntensity',
+  'alphaMap', 'aoMap', 'aoMapIntensity', 'lightMap', 'lightMapIntensity', 'displacementMap', 'displacementScale', 'displacementBias',
+  'opacity', 'transparent', 'alphaTest', 'side', 'vertexColors', 'flatShading', 'depthWrite', 'visible', 'userData'];
+function asPBR(material, coloured) {
+  let made = material;
+  if (LEGACY.has(material.type)) {
+    made = new THREE.MeshStandardMaterial();
+    for (const key of COPIED) if (material[key] !== undefined) made[key] = material[key]?.isColor || material[key]?.isVector2 ? material[key].clone() : material[key];
+    // Blinn-Phong's exponent to a GGX roughness; Lambert has no highlight at all.
+    const shininess = material.type === 'MeshPhongMaterial' ? material.shininess ?? 30 : 0;
+    made.roughness = THREE.MathUtils.clamp(Math.sqrt(2 / (shininess + 2)), .45, 1);
+    made.metalness = 0;
+    material.dispose();
+  }
+  const c = made.color;
+  if (coloured && made.vertexColors && c && !made.map && Math.abs(c.r - c.g) < .01 && Math.abs(c.g - c.b) < .01) c.setRGB(1, 1, 1);
+  return made;
+}
+function prepareImported(object, name) {
+  if (/\.(glb|gltf)$/i.test(name)) return;
+  object.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const coloured = !!o.geometry.attributes.color;
+    o.material = Array.isArray(o.material) ? o.material.map(m => asPBR(m, coloured)) : asPBR(o.material, coloured);
+  });
+}
+
+function setModel(object, name) { prepareImported(object, name); imported = makeRecord(object, name); show(imported); }
 
 /* SHADING is one list. Material: the file's own materials, with each texture
    map switchable below. Unlit: no lighting at all -- base colour, its texture
@@ -646,9 +703,11 @@ function syncSampleUI() {
   const on = !!sample && shown === sample;
   $('sample-toggle').setAttribute('aria-pressed', String(on));
   $('sample-toggle').title = on ? (imported ? `Back to ${imported.name}` : 'Hide the sample model') : 'Show the sample model';
-  $('sample-section').hidden = !on;
-  for (const b of document.querySelectorAll('[data-sample]')) b.setAttribute('aria-pressed', String(b.dataset.sample === sampleKey));
+  // The A-D row stays put whatever is on screen: opening a model only
+  // deselects it, and pressing the lit letter turns the sample off.
+  for (const b of document.querySelectorAll('[data-sample]')) b.setAttribute('aria-pressed', String(on && b.dataset.sample === sampleKey));
 }
+function hideSample() { if (imported) show(imported); else showNothing(); }
 function showSample(key = sampleKey) {
   if (busy) return;
   hideError();
@@ -660,11 +719,11 @@ function showSample(key = sampleKey) {
   }
   show(sample, SAMPLES[sampleKey].view);
 }
-$('sample-toggle').onclick = () => {
-  if (shown === sample && sample) { if (imported) show(imported); else showNothing(); }
-  else showSample();
+$('sample-toggle').onclick = () => { if (shown === sample && sample) hideSample(); else showSample(); };
+for (const b of document.querySelectorAll('[data-sample]')) b.onclick = () => {
+  if (busy) return;
+  if (shown === sample && sample && b.dataset.sample === sampleKey) hideSample(); else showSample(b.dataset.sample);
 };
-for (const b of document.querySelectorAll('[data-sample]')) b.onclick = () => showSample(b.dataset.sample);
 $('load-sample').onclick = () => showSample();
 
 /* SHIFT-CLICK A SECTION to open or close all of them: a closed one opens
@@ -726,6 +785,7 @@ window.mobiusDebug = {
   get playing() { return motion.playing; },
   emissive: () => { const m = [meshes[0]?.material].flat()[0]; return m?.emissive ? m.emissive.getHexString() : null; },
   influences: () => [...(meshes[0]?.morphTargetInfluences || [])].map(w => +w.toFixed(3)),
+  baseColors: () => meshes.flatMap(m => [m.material].flat()).map(m => m.color?.getHexString()),
   materials: () => meshes.flatMap(m => [m.material].flat()).map(m => ({ type: m.type, wireframe: m.wireframe, flatShading: m.flatShading, side: m.side })),
   sampleTop: () => { const c = sample?.root.geometry.attributes.color; if (!c) return null; let i = 0, best = 0; const h = sample.root.geometry.userData.height; for (let j = 0; j < h.length; j++) if (h[j] > h[best]) best = j; i = best; return { r: +c.getX(i).toFixed(3), g: +c.getY(i).toFixed(3), b: +c.getZ(i).toFixed(3) }; },
   get shownAt() { return shownAt; },
@@ -735,7 +795,8 @@ window.mobiusDebug = {
   // A frame drawn NOW, in the caller's task, for checks that read the canvas
   // back: with render-on-demand and no preserveDrawingBuffer the buffer is
   // only readable in the same task that drew it.
-  render: () => renderer.render(scene, camera),
+  render: () => { fitDepth(); renderer.render(scene, camera); },
+  get depthRange() { return [camera.near, camera.far]; },
   get swatchMark() { return { on: document.querySelector('.accent-mark')?.parentElement?.dataset.accent, path: swatchMark.path }; },
   lighting: () => ({ rim: rimLight.color.toArray().map(v => +v.toFixed(3)), under: underLight.color.toArray().map(v => +v.toFixed(3)), shadow: floor.visible, studio: scene.environment === studio.texture,
     // The shadow never shares a depth test with the grid, and draws after it.

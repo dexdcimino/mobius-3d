@@ -20,9 +20,12 @@ export function captureCamera(source, object, aspect) {
     distance = Math.max(distance, p.dot(back)+1.15*Math.max(Math.abs(p.dot(right))/tanX,Math.abs(p.dot(up))/tanY));
   }
   const radius = Math.max(box.getSize(new THREE.Vector3()).length()/2,.001);
-  camera.position.copy(center).addScaledVector(back,Math.max(distance,radius*1.01));
-  camera.near = radius/10000;
-  camera.far = distance+radius*10;
+  const away = Math.max(distance,radius*1.01);
+  camera.position.copy(center).addScaledVector(back,away);
+  // The live view's depth rule (fitDepth in viewer.js): a ratio of hundreds,
+  // not millions, so a socket a hair off the face does not flicker in the PNG.
+  camera.near = Math.max(Math.min((away-radius)*.9, away/50), away/1000);
+  camera.far = away+radius*10;
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld(true);
   return camera;

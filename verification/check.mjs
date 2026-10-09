@@ -146,6 +146,42 @@ try {
   await open('textured.obj', 'textured.mtl', 'checker.png');
   note(!(await card()) && /triangles/.test(await stats()), 'textured OBJ + MTL + PNG did not open');
 
+  // A ZBrush-style character: polypaint as vertex colours under a mid-grey
+  // Phong material, and black sockets 0.2% off the head. It used to come in at
+  // a fifth of its brightness, unlit by the studio, with the sockets flickering.
+  await open('character.fbx');
+  const character = await frame.evaluate(() => {
+    const select = document.getElementById('mode');
+    const pick = v => { select.value = v; select.dispatchEvent(new Event('change', { bubbles: true })); };
+    const materials = window.mobiusDebug.materials().map(m => m.type), colors = window.mobiusDebug.baseColors();
+    pick('raw');
+    window.mobiusDebug.render();
+    const gl = document.querySelector('canvas'), c = document.createElement('canvas');
+    c.width = gl.width; c.height = gl.height; c.getContext('2d').drawImage(gl, 0, 0);
+    const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let blue = 0, brightest = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 2] > 200 && px[i] < 60) blue++;
+      if (px[i + 2] > px[i] + 60) brightest = Math.max(brightest, px[i + 2]);
+    }
+    pick('material');
+    const [near, far] = window.mobiusDebug.depthRange;
+    const letters = [...document.querySelectorAll('[data-sample]')];
+    return { materials, colors, blue, brightest, ratio: far / near, row: !document.getElementById('sample-section').hidden,
+             pressed: letters.filter(b => b.getAttribute('aria-pressed') === 'true').length };
+  });
+  console.log(`character.fbx: ${JSON.stringify(character)}`);
+  note(character.materials.length && character.materials.every(t => t === 'MeshStandardMaterial'), `character.fbx: Phong not made PBR: ${character.materials}`);
+  note(character.colors.every(c => c === 'ffffff'), `character.fbx: the grey diffuse still tints the vertex colours: ${character.colors}`);
+  note(character.blue > 2000 && character.brightest > 240, `character.fbx: Unlit is not the polypaint's blue (${character.blue} px, peak ${character.brightest})`);
+  note(character.ratio < 1000, `character.fbx: depth range far/near is ${Math.round(character.ratio)}, the sockets will flicker`);
+  note(character.row && character.pressed === 0, `opening a model hid the sample row or left a letter lit: ${JSON.stringify(character)}`);
+  await frame.click('[data-sample=knot]');
+  const sampleOn = await frame.evaluate(() => window.mobiusDebug.shown);
+  await frame.click('[data-sample=knot]');
+  const sampleOff = await frame.evaluate(() => ({ shown: window.mobiusDebug.shown, lit: document.querySelector('[data-sample=knot]').getAttribute('aria-pressed') }));
+  note(sampleOn === 'sample' && sampleOff.shown === 'imported' && sampleOff.lit === 'false', `the lit letter did not turn the sample off: ${sampleOn} -> ${JSON.stringify(sampleOff)}`);
+
   // ---- 4. compressed glTF: the decoders, under the site's CSP --------------
   for (const [name, ext] of [['knot-draco.glb', 'KHR_draco_mesh_compression'], ['knot-meshopt.glb', 'EXT_meshopt_compression']]) {
     const bytes = await readFile(join(FIX, name));
