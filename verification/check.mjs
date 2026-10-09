@@ -208,12 +208,28 @@ try {
     views[label] = await frame.evaluate(() => window.mobiusDebug.gizmo.side);
     note(views[label] === side, `the gizmo's ${label} framed "${views[label]}", not ${side}`);
   }
+  // The hide button: top LEFT of the gizmo, named "Hide gizmo", with the
+  // site's dark tip under a real hover and no native title box.
+  const fold = await frame.evaluate(() => {
+    const b = document.querySelector('#gizmo .gizmo-fold'), g = document.getElementById('gizmo').getBoundingClientRect(), r = b.getBoundingClientRect();
+    return { left: Math.round(r.left - g.left), top: Math.round(r.top - g.top), label: b.getAttribute('aria-label'), title: b.hasAttribute('title'), x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  const fBox = await (await page.$('#f')).boundingBox();
+  await page.mouse.move(fBox.x + fold.x, fBox.y + fold.y);
+  await frame.waitForTimeout(600);
+  const tip = await frame.evaluate(() => {
+    const t = document.querySelector('#gizmo .gizmo-fold .gizmo-tip'), cs = getComputedStyle(t), b = document.querySelector('#gizmo .gizmo-fold').getBoundingClientRect(), r = t.getBoundingClientRect();
+    return { text: t.textContent, opacity: cs.opacity, radius: cs.borderTopLeftRadius, right: r.left > b.right, centred: Math.abs((r.top + r.bottom) / 2 - (b.top + b.bottom) / 2) < 1.5 };
+  });
+  note(fold.left === 0 && fold.top === 0 && fold.label === 'Hide gizmo' && !fold.title, `the gizmo's hide button is not top left as "Hide gizmo" with no title: ${JSON.stringify(fold)}`);
+  note(tip.text === 'Hide gizmo' && tip.opacity === '1' && tip.radius === '8px' && tip.right && tip.centred, `the hide button's tip did not show on hover: ${JSON.stringify(tip)}`);
+  await page.mouse.move(0, 0);
   await frame.click('#gizmo .gizmo-fold');
   const folded = await frame.evaluate(() => ({ folded: window.mobiusDebug.gizmo.folded, svg: getComputedStyle(document.querySelector('#gizmo > svg')).display, saved: localStorage.getItem('mobius-gizmo') }));
   await frame.click('#gizmo .gizmo-open');
   const unfolded = await frame.evaluate(() => window.mobiusDebug.gizmo.folded);
   note(folded.folded && folded.svg === 'none' && folded.saved === 'folded' && !unfolded, `the gizmo did not fold and unfold: ${JSON.stringify(folded)} / ${unfolded}`);
-  console.log(`gizmo: ${JSON.stringify(gizmoBox)}, views ${JSON.stringify(views)}; toon ${JSON.stringify(toon)}`);
+  console.log(`gizmo: ${JSON.stringify(gizmoBox)}, fold ${JSON.stringify(fold)}, tip ${JSON.stringify(tip)}, views ${JSON.stringify(views)}; toon ${JSON.stringify(toon)}`);
 
   // ---- 4. compressed glTF: the decoders, under the site's CSP --------------
   for (const [name, ext] of [['knot-draco.glb', 'KHR_draco_mesh_compression'], ['knot-meshopt.glb', 'EXT_meshopt_compression']]) {

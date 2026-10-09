@@ -1,6 +1,2 @@
-- Your own models look like themselves: vertex colours (ZBrush polypaint) are no longer darkened by the file's grey material, in every mode including Unlit
-- FBX, OBJ, DAE and 3DS materials are now lit by the studio like the samples, instead of only by four lights
-- Eyes, sockets and decals sitting a hair off a surface no longer flicker, at any zoom
-- Opening a model keeps the A-D sample row; clicking the lit letter turns the sample off
-- New **Toon** surface: three flat bands of light with an ink outline
-- New orientation gizmo under the title: X, Y and Z as the camera sees them, the side you are looking at (front is +Z), click an axis to view from that side, fold it to an icon with the corner button
+- The orientation gizmo's hide button moved to its top left corner and is now called "Hide gizmo"
+- Its tip is the app's own dark, rounded tip instead of the system's plain box
