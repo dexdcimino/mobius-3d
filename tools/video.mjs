@@ -229,7 +229,9 @@ try {
   caption('Middle drag to pan');
   await until(4.0);
   await panAt(4.3, W * .07, H * .03, .9);
-  await panAt(5.5, -W * .07, -H * .03, .9);
+  await panAt(5.25, -W * .07, -H * .03, .8);
+  // v5 (Dex): swing back to the front view; the angled one is a bad shot to sit on.
+  await orbitAt(6.1, -W * .12, -H * .04, 1.0, 1 / 1.12);
   caption('Switch the shading');
   await clickAt(7.3, 'summary:text-is("Surface")', QUICK);
   await chooseAt(8.3, 'mode', 'Normals');
